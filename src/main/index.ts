@@ -56,8 +56,12 @@ if (app.isPackaged && !IS_DEV) {
 }
 
 // URL configuration (exported for use in other modules)
-// Uses MAIN_VITE_API_URL from .env if set, otherwise defaults to production
+// In packaged app, ALWAYS use production URL to prevent localhost leaking into releases
+// In dev mode, allow override via MAIN_VITE_API_URL env variable
 export function getBaseUrl(): string {
+  if (app.isPackaged) {
+    return "https://21st.dev"
+  }
   return import.meta.env.MAIN_VITE_API_URL || "https://21st.dev"
 }
 

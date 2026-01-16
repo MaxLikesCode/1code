@@ -70,6 +70,7 @@ import { soundNotificationsEnabledAtom } from "../../../lib/atoms"
 import { appStore } from "../../../lib/jotai-store"
 import { api } from "../../../lib/mock-api"
 import { trpc, trpcClient } from "../../../lib/trpc"
+import { getQueryClient } from "../../../contexts/TRPCProvider"
 import { cn } from "../../../lib/utils"
 import { getShortcutKey, isDesktopApp } from "../../../lib/utils/platform"
 import { terminalSidebarOpenAtom } from "../../terminal/atoms"
@@ -1725,6 +1726,32 @@ function ChatViewInner({
             new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
         )
       })
+    }
+
+    // Desktop app: Optimistic update for chats.list to update sidebar immediately
+    const queryClient = getQueryClient()
+    if (queryClient) {
+      const now = new Date()
+      const queries = queryClient.getQueryCache().getAll()
+      const chatsListQuery = queries.find(q =>
+        Array.isArray(q.queryKey) &&
+        Array.isArray(q.queryKey[0]) &&
+        q.queryKey[0][0] === 'chats' &&
+        q.queryKey[0][1] === 'list'
+      )
+      if (chatsListQuery) {
+        queryClient.setQueryData(chatsListQuery.queryKey, (old: any[] | undefined) => {
+          if (!old) return old
+          // Update the timestamp and sort by updatedAt descending
+          const updated = old.map((c: any) =>
+            c.id === parentChatId ? { ...c, updatedAt: now } : c,
+          )
+          return updated.sort(
+            (a: any, b: any) =>
+              new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+          )
+        })
+      }
     }
 
     // Optimistically update sub-chat timestamp to move it to top
@@ -3852,6 +3879,9 @@ export function ChatView({
 
           // Refresh diff stats after agent finishes making changes
           fetchDiffStatsRef.current()
+
+          // Note: sidebar timestamp update is handled via optimistic update in handleSend
+          // No need to refetch here as it would overwrite the optimistic update with stale data
         },
       })
 
@@ -3971,6 +4001,9 @@ export function ChatView({
 
           // Refresh diff stats after agent finishes making changes
           fetchDiffStatsRef.current()
+
+          // Note: sidebar timestamp update is handled via optimistic update in handleSend
+          // No need to refetch here as it would overwrite the optimistic update with stale data
         },
       })
       agentChatStore.set(newId, newChat, chatId)

@@ -273,6 +273,15 @@ function walkTreeOnce(root: HTMLElement, range: Range | null): TreeWalkResult {
   let slashPosition: { node: Node; offset: number } | null = null
   let slashIndex = -1
 
+  // Handle case where cursor is in root element (not in a text node)
+  // This happens when the editor is empty or cursor is at element boundary
+  let cursorInRoot = false
+  let cursorRootOffset = 0
+  if (range && range.endContainer === root) {
+    cursorInRoot = true
+    cursorRootOffset = range.endOffset
+  }
+
   const walker = document.createTreeWalker(
     root,
     NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
@@ -283,9 +292,24 @@ function walkTreeOnce(root: HTMLElement, range: Range | null): TreeWalkResult {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent || ""
 
-      // Check if cursor is in this node
-      if (range && !reachedCursor && node === range.endContainer) {
-        const cursorOffset = range.endOffset
+      // Check if cursor is in this node (direct case)
+      const cursorInThisNode = range && !reachedCursor && node === range.endContainer
+
+      // Handle cursor in root element - cursor is positioned between children
+      // cursorRootOffset indicates the child index where cursor is
+      let cursorAtRootBoundary = false
+      if (cursorInRoot && !reachedCursor && node.parentNode === root) {
+        const children = Array.from(root.childNodes)
+        const nodeIndex = children.indexOf(node as ChildNode)
+        // If cursor is after this node, include full text
+        // If cursor is at this node's position, we've passed the cursor
+        if (nodeIndex >= cursorRootOffset) {
+          cursorAtRootBoundary = true
+        }
+      }
+
+      if (cursorInThisNode) {
+        const cursorOffset = range!.endOffset
         textBeforeCursor += text.slice(0, cursorOffset)
         reachedCursor = true
 
@@ -328,6 +352,10 @@ function walkTreeOnce(root: HTMLElement, range: Range | null): TreeWalkResult {
             }
           }
         }
+      } else if (cursorAtRootBoundary) {
+        // Cursor is in root element, at or past this node's position
+        // Mark as reached and don't include this text in textBeforeCursor
+        reachedCursor = true
       } else if (!reachedCursor) {
         textBeforeCursor += text
         // Track @ positions as we go

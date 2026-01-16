@@ -1,8 +1,13 @@
 import { AuthStore, AuthData, AuthUser } from "./auth-store"
 import { app, BrowserWindow } from "electron"
 
-// Auth API URL - use env variable for local testing, default to production
-const AUTH_API_URL = import.meta.env.MAIN_VITE_API_URL || "https://21st.dev"
+// Get API URL - in packaged app always use production, in dev allow override
+function getApiBaseUrl(): string {
+  if (app.isPackaged) {
+    return "https://21st.dev"
+  }
+  return import.meta.env.MAIN_VITE_API_URL || "https://21st.dev"
+}
 
 export class AuthManager {
   private store: AuthStore
@@ -29,7 +34,7 @@ export class AuthManager {
   }
 
   private getApiUrl(): string {
-    return AUTH_API_URL
+    return getApiBaseUrl()
   }
 
   /**
