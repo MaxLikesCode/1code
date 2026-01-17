@@ -1712,6 +1712,8 @@ function ChatViewInner({
           }
         }
       }
+      // Clear manually aborted flag when regenerating
+      agentChatStore.clearManuallyAborted(subChatId)
       regenerate()
     }
   }, [
@@ -1969,6 +1971,9 @@ function ChatViewInner({
     if (isArchived && onRestoreWorkspace) {
       onRestoreWorkspace()
     }
+
+    // Clear manually aborted flag when user sends a new message
+    agentChatStore.clearManuallyAborted(subChatId)
 
     // Get value from uncontrolled editor
     const inputValue = editorRef.current?.getValue() || ""
@@ -5001,7 +5006,11 @@ export function ChatView({
               onCreateNewSubChat={handleCreateNewSubChat}
               teamId={selectedTeamId || undefined}
               repository={repository}
-              streamId={agentChatStore.getStreamId(activeSubChatId)}
+              streamId={
+                agentChatStore.wasManuallyAborted(activeSubChatId)
+                  ? null
+                  : agentChatStore.getStreamId(activeSubChatId)
+              }
               isMobile={isMobileFullscreen}
               isSubChatsSidebarOpen={subChatsSidebarMode === "sidebar"}
               sandboxId={sandboxId || undefined}
