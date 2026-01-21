@@ -20,8 +20,6 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "../../../../components/ui/tooltip";
-import { SearchCombobox } from "../../../../components/ui/search-combobox";
-import { PopoverTrigger } from "../../../../components/ui/popover";
 import { IconCloseSidebarRight, IconFetch, IconForcePush, IconSpinner, AgentIcon, CircleFilterIcon, IconReview, ExternalLinkIcon } from "../../../../components/ui/icons";
 import { DiffViewModeSwitcher } from "./diff-view-mode-switcher";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
@@ -38,6 +36,7 @@ import {
 	GitMerge,
 	GitPullRequest,
 	MoreHorizontal,
+	RefreshCw,
 	Rows2,
 	Square,
 	Upload,
@@ -210,12 +209,6 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 		onError: (error: { message: string }) => toast.error(`Merge failed: ${error.message}`),
 	});
 
-	const checkoutMutation = trpc.changes.checkout.useMutation({
-		onSuccess: () => {
-			refetchBranches();
-		},
-	});
-
 	const { pr } = usePRStatus({
 		worktreePath,
 		refetchInterval: 30000,
@@ -282,44 +275,6 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 			if (timeoutRef.current) clearTimeout(timeoutRef.current);
 		};
 	}, []);
-
-	const branches = branchData?.local ?? [];
-	const [isBranchSelectorOpen, setIsBranchSelectorOpen] = useState(false);
-
-	// Render branch item for SearchCombobox
-	const renderBranchItem = useCallback((branchInfo: { branch: string; lastCommitDate?: number }) => {
-		const isDefault = branchInfo.branch === branchData?.defaultBranch;
-		const isCurrent = branchInfo.branch === currentBranch;
-		const timeAgo = branchInfo.lastCommitDate ? formatTimeSince(new Date(branchInfo.lastCommitDate)) : "";
-
-		return (
-			<div className="flex items-center gap-2 flex-1 min-w-0">
-				<LuGitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-				<span className={cn("text-sm truncate flex-1", isCurrent && "font-medium")}>
-					{branchInfo.branch}
-				</span>
-				{isDefault && (
-					<span className="text-[10px] text-muted-foreground shrink-0">
-						default
-					</span>
-				)}
-				{timeAgo && (
-					<span className="text-[10px] text-muted-foreground/70 shrink-0">
-						{timeAgo}
-					</span>
-				)}
-			</div>
-		);
-	}, [branchData?.defaultBranch, currentBranch]);
-
-	const handleBranchSelectFromCombobox = useCallback((branchInfo: { branch: string }) => {
-		if (branchInfo.branch === currentBranch) {
-			setIsBranchSelectorOpen(false);
-			return;
-		}
-		checkoutMutation.mutate({ worktreePath, branch: branchInfo.branch });
-		setIsBranchSelectorOpen(false);
-	}, [currentBranch, checkoutMutation, worktreePath]);
 
 	// Check pending states
 	const isPushPending = pushMutation.isPending;
@@ -510,36 +465,13 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 					/>
 				)}
 
-				{/* Branch selector with search */}
-				<SearchCombobox
-					isOpen={isBranchSelectorOpen}
-					onOpenChange={setIsBranchSelectorOpen}
-					items={branches}
-					onSelect={handleBranchSelectFromCombobox}
-					placeholder="Search branches..."
-					emptyMessage="No branches found"
-					getItemValue={(branchInfo) => branchInfo.branch}
-					renderItem={renderBranchItem}
-					width="w-56"
-					align="start"
-					side="bottom"
-					sideOffset={4}
-					trigger={
-						<PopoverTrigger asChild>
-							<Button
-								variant="ghost"
-								size="sm"
-								className="h-6 px-2 gap-1 text-xs font-medium min-w-0 hover:bg-foreground/10"
-							>
-								<LuGitBranch className="size-3.5 shrink-0 opacity-70" />
-								<span className="truncate max-w-[80px]">
-									{currentBranch || "No branch"}
-								</span>
-								<HiChevronDown className="size-3 shrink-0 opacity-50" />
-							</Button>
-						</PopoverTrigger>
-					}
-				/>
+				{/* Branch name display (branch switching will be added later) */}
+				<div className="h-6 px-2 gap-1 text-xs font-medium min-w-0 flex items-center">
+					<LuGitBranch className="size-3.5 shrink-0 opacity-70" />
+					<span className="truncate max-w-[120px] text-foreground">
+						{currentBranch || "No branch"}
+					</span>
+				</div>
 
 				{/* PR Status badge */}
 				{pr && (
@@ -929,6 +861,22 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 
 						{/* Separator only if we have hidden review above */}
 						{(!showReviewButton && diffStats.hasChanges && onReview) && (
+							<DropdownMenuSeparator />
+						)}
+
+						{/* Refresh diff view */}
+						{onRefresh && (
+							<DropdownMenuItem
+								onClick={onRefresh}
+								className="text-xs"
+							>
+								<RefreshCw className="mr-2 size-3.5" />
+								<span>Refresh diff view</span>
+							</DropdownMenuItem>
+						)}
+
+						{/* Separator after refresh if view mode submenu follows */}
+						{onRefresh && !showViewModeToggle && onViewModeChange && (
 							<DropdownMenuSeparator />
 						)}
 

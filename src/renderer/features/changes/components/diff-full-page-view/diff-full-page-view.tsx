@@ -18,6 +18,7 @@ export function DiffFullPageView({
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.stopPropagation() // Prevent ESC from bubbling to stop stream handler
         onClose()
       }
     },

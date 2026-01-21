@@ -47,6 +47,7 @@ import {
   saveSubChatDraftWithAttachments,
   clearSubChatDraft,
 } from "../lib/drafts"
+import { CLAUDE_MODELS } from "../lib/models"
 import { type SubChatFileChange } from "../atoms"
 import {
   customClaudeConfigAtom,
@@ -64,10 +65,7 @@ function useAvailableModels() {
   })
   const showOfflineFeatures = useAtomValue(showOfflineModeFeaturesAtom)
 
-  const baseModels = [
-    { id: "sonnet", name: "Sonnet" },
-    { id: "opus", name: "Opus" },
-  ]
+  const baseModels = CLAUDE_MODELS
 
   const isOffline = ollamaStatus ? !ollamaStatus.internet.online : false
   const hasOllama = ollamaStatus?.ollama.available && !!ollamaStatus.ollama.recommendedModel
@@ -1007,10 +1005,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                     size="icon"
                     className="h-7 w-7 rounded-sm outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={
-                      isStreaming ||
-                      (images.length >= 5 && files.length >= 10)
-                    }
+                    disabled={images.length >= 5 && files.length >= 10}
                   >
                     <AttachIcon className="h-4 w-4" />
                   </Button>

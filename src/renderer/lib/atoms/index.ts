@@ -432,6 +432,17 @@ export const systemDarkThemeIdAtom = atomWithStorage<string>(
 )
 
 /**
+ * Show workspace icon in sidebar
+ * When disabled, hides the project icon and moves loader/status indicators to the right of the name
+ */
+export const showWorkspaceIconAtom = atomWithStorage<boolean>(
+  "preferences:show-workspace-icon",
+  false, // Hidden by default
+  undefined,
+  { getOnInit: true },
+)
+
+/**
  * Cached full theme data for the selected theme
  * This is populated when a theme is selected and used for applying CSS variables
  */

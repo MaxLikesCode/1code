@@ -268,13 +268,6 @@ const CodexIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 )
 
-// Model options for Claude Code
-const claudeModels = [
-  { id: "opus", name: "Opus" },
-  { id: "sonnet", name: "Sonnet" },
-  { id: "haiku", name: "Haiku" },
-]
-
 // Agent providers
 const agents = [
   { id: "claude-code", name: "Claude Code", hasModels: true },
@@ -2283,12 +2276,14 @@ const ChatViewInner = memo(function ChatViewInner({
     if (isStreamingRef.current) {
       const item = createQueueItem(generateQueueId(), message)
       addToQueue(subChatId, item)
+      toast.success("Reply queued", { description: "Will be sent when current response completes" })
     } else {
       // Send directly
       sendMessageRef.current({
         role: "user",
         parts: [{ type: "text", text: message }],
       })
+      toast.success("Reply sent")
     }
 
     // Clear state and selection
@@ -5235,18 +5230,14 @@ Make sure to preserve all functionality from both branches when resolving confli
         e.preventDefault()
         e.stopPropagation()
 
-        // Toggle: close if open, open if has changes
-        if (isDiffSidebarOpen) {
-          setIsDiffSidebarOpen(false)
-        } else if (diffStats.hasChanges) {
-          setIsDiffSidebarOpen(true)
-        }
+        // Toggle diff sidebar
+        setIsDiffSidebarOpen(!isDiffSidebarOpen)
       }
     }
 
     window.addEventListener("keydown", handleKeyDown, true)
     return () => window.removeEventListener("keydown", handleKeyDown, true)
-  }, [diffStats.hasChanges, isDiffSidebarOpen])
+  }, [isDiffSidebarOpen])
 
   // Keyboard shortcut: Create PR (preview)
   // Web: Opt+Cmd+P (browser uses Cmd+P for print)

@@ -91,23 +91,24 @@ export const IsolatedMessageGroup = memo(function IsolatedMessageGroup({
   const isLastGroup = useAtomValue(isLastUserMessageAtomFamily(userMsgId))
   const isStreaming = useAtomValue(isStreamingAtom)
 
-  if (!userMsg) return null
-
   // Extract user message content
   const rawTextContent =
-    userMsg.parts
+    userMsg?.parts
       ?.filter((p: any) => p.type === "text")
       .map((p: any) => p.text)
       .join("\n") || ""
 
   const imageParts =
-    userMsg.parts?.filter((p: any) => p.type === "data-image") || []
+    userMsg?.parts?.filter((p: any) => p.type === "data-image") || []
 
   // Extract text mentions (quote/diff) to render separately above sticky block
+  // NOTE: useMemo must be called before any early returns to follow Rules of Hooks
   const { textMentions, cleanedText: textContent } = useMemo(
     () => extractTextMentions(rawTextContent),
     [rawTextContent]
   )
+
+  if (!userMsg) return null
 
   // Show cloning when sandbox is being set up
   const shouldShowCloning =

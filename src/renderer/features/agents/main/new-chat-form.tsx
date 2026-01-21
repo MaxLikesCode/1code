@@ -50,6 +50,8 @@ const selectedTeamIdAtom = atom<string | null>(null)
 import {
   agentsSettingsDialogOpenAtom,
   agentsSettingsDialogActiveTabAtom,
+  customClaudeConfigAtom,
+  normalizeCustomClaudeConfig,
   showOfflineModeFeaturesAtom,
 } from "../../../lib/atoms"
 // Desktop uses real tRPC
@@ -90,6 +92,7 @@ import {
   markDraftVisible,
   type DraftProject,
 } from "../lib/drafts"
+import { CLAUDE_MODELS } from "../lib/models"
 // import type { PlanType } from "@/lib/config/subscription-plans"
 type PlanType = string
 
@@ -107,11 +110,7 @@ function useAvailableModels() {
   })
   const showOfflineFeatures = useAtomValue(showOfflineModeFeaturesAtom)
 
-  const baseModels = [
-    { id: "opus", name: "Opus" },
-    { id: "sonnet", name: "Sonnet" },
-    { id: "haiku", name: "Haiku" },
-  ]
+  const baseModels = CLAUDE_MODELS
 
   const isOffline = ollamaStatus ? !ollamaStatus.internet.online : false
   const hasOllama = ollamaStatus?.ollama.available && !!ollamaStatus.ollama.recommendedModel
@@ -204,6 +203,10 @@ export function NewChatForm({
   const [isPlanMode, setIsPlanMode] = useAtom(isPlanModeAtom)
   const [workMode, setWorkMode] = useAtom(lastSelectedWorkModeAtom)
   const debugMode = useAtomValue(agentsDebugModeAtom)
+  const customClaudeConfig = useAtomValue(customClaudeConfigAtom)
+  const normalizedCustomClaudeConfig =
+    normalizeCustomClaudeConfig(customClaudeConfig)
+  const hasCustomClaudeConfig = Boolean(normalizedCustomClaudeConfig)
   const setSettingsDialogOpen = useSetAtom(agentsSettingsDialogOpenAtom)
   const setSettingsActiveTab = useSetAtom(agentsSettingsDialogActiveTabAtom)
   const setJustCreatedIds = useSetAtom(justCreatedIdsAtom)
@@ -323,6 +326,7 @@ export function NewChatForm({
   const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasShownTooltipRef = useRef(false)
   const [modeDropdownOpen, setModeDropdownOpen] = useState(false)
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false)
 
   // Shift+Tab handler for mode switching (now handled inside input component via onShiftTab prop)
 
@@ -1264,16 +1268,35 @@ export function NewChatForm({
                       </DropdownMenu>
 
                       {/* Model selector */}
-                      <DropdownMenu>
+                      <DropdownMenu
+                        open={hasCustomClaudeConfig ? false : isModelDropdownOpen}
+                        onOpenChange={(open) => {
+                          if (!hasCustomClaudeConfig) {
+                            setIsModelDropdownOpen(open)
+                          }
+                        }}
+                      >
                         <DropdownMenuTrigger asChild>
-                          <button className="flex items-center gap-1.5 px-2 py-1 text-sm text-muted-foreground hover:text-foreground transition-[background-color,color] duration-150 ease-out rounded-md hover:bg-muted/50 outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70">
-                            {selectedModel?.id === "offline" ? (
+                          <button
+                            disabled={hasCustomClaudeConfig}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2 py-1 text-sm text-muted-foreground transition-[background-color,color] duration-150 ease-out rounded-md outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70",
+                              hasCustomClaudeConfig
+                                ? "opacity-70 cursor-not-allowed"
+                                : "hover:text-foreground hover:bg-muted/50",
+                            )}
+                          >
+                            {hasCustomClaudeConfig ? (
+                              <ClaudeCodeIcon className="h-3.5 w-3.5" />
+                            ) : selectedModel?.id === "offline" ? (
                               <WifiOff className="h-3.5 w-3.5" />
                             ) : (
                               <ClaudeCodeIcon className="h-3.5 w-3.5" />
                             )}
                             <span>
-                              {selectedModel?.id === "offline" ? (
+                              {hasCustomClaudeConfig ? (
+                                "Custom Model"
+                              ) : selectedModel?.id === "offline" ? (
                                 selectedModel.name
                               ) : (
                                 <>

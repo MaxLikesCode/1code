@@ -1714,6 +1714,62 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       filteredDiffFiles,
     ])
 
+    // DEBUG: Detect when diff view should render but doesn't
+    // This helps diagnose issues where changes exist but diff view shows "No changes detected"
+    useEffect(() => {
+      // Only run diagnostic after initial load is complete
+      if (isLoadingDiff) return
+
+      const hasRawDiff = diff && diff.trim().length > 0
+      const hasParsedFiles = initialParsedFiles && initialParsedFiles.length > 0
+      const hasAllFiles = allFileDiffs.length > 0
+      const hasFilteredFiles = fileDiffs.length > 0
+      const hasVirtualItems = virtualizer.getVirtualItems().length > 0
+
+      // Case 1: We have raw diff but no parsed files
+      if (hasRawDiff && !hasAllFiles) {
+        console.error('[DiffView Debug] Raw diff exists but parsing failed:', {
+          diffLength: diff?.length,
+          diffPreview: diff?.slice(0, 200),
+        })
+      }
+
+      // Case 2: We have parsed files but filter excludes all of them
+      if (hasAllFiles && !hasFilteredFiles && effectiveFilter) {
+        console.error('[DiffView Debug] All files filtered out:', {
+          allFilesCount: allFileDiffs.length,
+          allFilePaths: allFileDiffs.map(f => f.newPath || f.oldPath),
+          filter: effectiveFilter,
+        })
+      }
+
+      // Case 3: We have filtered files but virtualizer shows nothing
+      if (hasFilteredFiles && !hasVirtualItems) {
+        console.error('[DiffView Debug] Files exist but virtualizer renders nothing:', {
+          filteredFilesCount: fileDiffs.length,
+          scrollContainerExists: !!scrollContainerRef.current,
+          scrollContainerHeight: scrollContainerRef.current?.clientHeight,
+          virtualizerTotalSize: virtualizer.getTotalSize(),
+        })
+      }
+
+      // Case 4: Initial data provided but not being used
+      if (hasParsedFiles && !hasAllFiles) {
+        console.error('[DiffView Debug] initialParsedFiles provided but not used:', {
+          initialParsedFilesCount: initialParsedFiles?.length,
+          initialParsedFilesPaths: initialParsedFiles?.map(f => f.newPath || f.oldPath),
+        })
+      }
+    }, [
+      isLoadingDiff,
+      diff,
+      initialParsedFiles,
+      allFileDiffs,
+      fileDiffs,
+      effectiveFilter,
+      virtualizer,
+    ])
+
     // Scroll to focused file when atom changes (works with virtualized list)
     useEffect(() => {
       if (!focusedDiffFile || isLoadingDiff) {
