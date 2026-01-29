@@ -19,7 +19,7 @@ By [21st.dev](https://21st.dev) team
 | **Integrated Terminal** | ✅ | ❌ |
 | **Plan Mode** | ✅ | ✅ |
 | **MCP Support** | ✅ | ✅ |
-| **Memory (CLAUDE.md)** | ✅ | ✅ |
+| **Memory (CLAUDE.md & AGENTS.md)** | ✅ | ✅ |
 | **Skills & Slash Commands** | ✅ | ✅ |
 | **Custom Subagents** | ✅ | ✅ |
 | **Subscription & API Key Support** | ✅ | ✅ |

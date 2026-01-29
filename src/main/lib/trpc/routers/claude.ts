@@ -980,6 +980,20 @@ export const claudeRouter = router({
               })
             }
 
+            // Read AGENTS.md from project root if it exists
+            let agentsMdContent: string | undefined
+            try {
+              const agentsMdPath = path.join(input.cwd, "AGENTS.md")
+              agentsMdContent = await fs.readFile(agentsMdPath, "utf-8")
+              if (agentsMdContent.trim()) {
+                console.log(`[claude] Found AGENTS.md at ${agentsMdPath} (${agentsMdContent.length} chars)`)
+              } else {
+                agentsMdContent = undefined
+              }
+            } catch {
+              // AGENTS.md doesn't exist or can't be read - that's fine
+            }
+
             // For Ollama: embed context AND history directly in prompt
             // Ollama doesn't have server-side sessions, so we must include full history
             let finalQueryPrompt: string | AsyncIterable<any> = prompt
@@ -1077,7 +1091,11 @@ IMPORTANT: When using tools, use these EXACT parameter names:
 
 When asked about the project, use Glob to find files and Read to examine them.
 Be concise and helpful.
-[/CONTEXT]
+[/CONTEXT]${agentsMdContent ? `
+
+[AGENTS.MD]
+${agentsMdContent}
+[/AGENTS.MD]` : ''}
 
 ${historyText}[CURRENT REQUEST]
 ${prompt}
@@ -1087,10 +1105,17 @@ ${prompt}
             }
 
             // System prompt config - use preset for both Claude and Ollama
-            const systemPromptConfig = {
-              type: "preset" as const,
-              preset: "claude_code" as const,
-            }
+            // If AGENTS.md exists, append its content to the system prompt
+            const systemPromptConfig = agentsMdContent
+              ? {
+                  type: "preset" as const,
+                  preset: "claude_code" as const,
+                  append: `\n\n# AGENTS.md\nThe following are the project's AGENTS.md instructions:\n\n${agentsMdContent}`,
+                }
+              : {
+                  type: "preset" as const,
+                  preset: "claude_code" as const,
+                }
 
             const queryOptions = {
               prompt: finalQueryPrompt,
