@@ -1298,6 +1298,29 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks are stable, excluding to prevent loops
     }, [collapsedByFileKey, fileDiffs])
 
+    // Proactively invalidate viewed state when file content changes (hash mismatch)
+    // This ensures all consumers of viewedFilesAtomFamily (changes-view, changes-widget)
+    // see the correct viewed state, not just agent-diff-view which checks hashes locally
+    useEffect(() => {
+      if (fileDiffs.length === 0) return
+
+      const keysToInvalidate: string[] = []
+      for (const file of fileDiffs) {
+        const viewedState = viewedFiles[file.key]
+        if (viewedState?.viewed && viewedState.contentHash !== hashString(file.diffText)) {
+          keysToInvalidate.push(file.key)
+        }
+      }
+
+      if (keysToInvalidate.length > 0) {
+        const updated = { ...viewedFiles }
+        for (const key of keysToInvalidate) {
+          updated[key] = { viewed: false, contentHash: "" }
+        }
+        setViewedFiles(updated)
+      }
+    }, [fileDiffs, viewedFiles, setViewedFiles])
+
     // Notify parent when viewed count changes
     const prevViewedCountRef = useRef<number | null>(null)
     useEffect(() => {

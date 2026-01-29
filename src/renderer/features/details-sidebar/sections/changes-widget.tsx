@@ -127,19 +127,13 @@ export const ChangesWidget = memo(function ChangesWidget({
     }
   }, [displayFiles.length])
 
-  // Check if file is marked as viewed
-  const isFileMarkedAsViewed = useCallback(
-    (filePath: string): boolean => {
-      const possibleKeys = [
-        `${filePath}->${filePath}`, // Modified
-        `/dev/null->${filePath}`, // New file
-        `${filePath}->/dev/null`, // Deleted file
-      ]
-      for (const key of possibleKeys) {
-        const viewedState = viewedFiles[key]
-        if (viewedState?.viewed) {
-          return true
-        }
+  // Check if file is marked as viewed using its diff key directly
+  const isFileViewed = useCallback(
+    (file: ParsedDiffFile): boolean => {
+      // Use the actual key from the parsed diff (oldPath->newPath) for exact match
+      const viewedState = viewedFiles[file.key]
+      if (viewedState?.viewed) {
+        return true
       }
       return false
     },
@@ -259,7 +253,7 @@ export const ChangesWidget = memo(function ChangesWidget({
                     dirPath={getFileDir(filePath)}
                     status={getFileStatus(file)}
                     isChecked={selectedForCommit.has(filePath)}
-                    isViewed={isFileMarkedAsViewed(filePath)}
+                    isViewed={isFileViewed(file)}
                     isUntracked={file.isNewFile ?? false}
                     showContextMenu={!!worktreePath}
                     onSelect={() => {
