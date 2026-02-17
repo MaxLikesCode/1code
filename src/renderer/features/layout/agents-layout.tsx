@@ -11,6 +11,7 @@ import {
   agentsSettingsDialogOpenAtom,
   apiKeyOnboardingCompletedAtom,
   billingMethodAtom,
+  claudeLoginModalConfigAtom,
   codexOnboardingCompletedAtom,
   isDesktopAtom,
   isFullscreenAtom,
@@ -108,6 +109,7 @@ export function AgentsLayout() {
   const setApiKeyOnboardingCompleted = useSetAtom(apiKeyOnboardingCompletedAtom)
   const setCodexOnboardingCompleted = useSetAtom(codexOnboardingCompletedAtom)
   const setBillingMethod = useSetAtom(billingMethodAtom)
+  const claudeLoginModalConfig = useAtomValue(claudeLoginModalConfigAtom)
 
   // Fetch projects to validate selectedProject exists
   const { data: projects, isLoading: isLoadingProjects } =
@@ -144,9 +146,13 @@ export function AgentsLayout() {
   ])
 
   // Show/hide native traffic lights based on sidebar and fullscreen state
-  // This also re-syncs visibility when leaving fullscreen
+  // This also re-syncs visibility when leaving fullscreen.
+  // When settings view is active, don't control traffic lights here —
+  // SettingsSidebar manages its own visibility (always hidden).
+  const isSettingsView = desktopView === "settings"
   useEffect(() => {
     if (!isDesktop) return
+    if (isSettingsView) return // SettingsSidebar handles its own traffic light state
     if (
       typeof window === "undefined" ||
       !window.desktopApi?.setTrafficLightVisibility
@@ -154,7 +160,7 @@ export function AgentsLayout() {
       return
 
     window.desktopApi.setTrafficLightVisibility(sidebarOpen)
-  }, [sidebarOpen, isDesktop, isFullscreen])
+  }, [sidebarOpen, isDesktop, isFullscreen, isSettingsView])
 
   const setChatId = useAgentSubChatStore((state) => state.setChatId)
 
@@ -286,13 +292,16 @@ export function AgentsLayout() {
     setSidebarOpen(false)
   }, [setSidebarOpen])
 
-  const isSettingsView = desktopView === "settings"
-
   return (
     <TooltipProvider delayDuration={300}>
       {/* Global queue processor - handles message queues for all sub-chats */}
       <QueueProcessor />
-      <ClaudeLoginModal />
+      <ClaudeLoginModal
+        hideCustomModelSettingsLink={
+          claudeLoginModalConfig.hideCustomModelSettingsLink
+        }
+        autoStartAuth={claudeLoginModalConfig.autoStartAuth}
+      />
       <CodexLoginModal />
       <div className="flex flex-col w-full h-full relative overflow-hidden bg-background select-none">
         {/* Windows Title Bar (only shown on Windows with frameless window) */}

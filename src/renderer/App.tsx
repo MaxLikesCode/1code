@@ -72,6 +72,24 @@ function AppContent() {
     }
   }, [setSelectedChatId, setChatId, addToOpenSubChats, setActiveSubChat])
 
+  // Claim the initially selected chat to prevent duplicate windows.
+  // For new windows opened via "Open in new window", the chat is pre-claimed by main process.
+  // For restored windows (persisted localStorage), we need to claim here.
+  // Read atom directly from store to avoid stale closure with empty deps.
+  useEffect(() => {
+    if (!window.desktopApi?.claimChat) return
+    const currentChatId = appStore.get(selectedAgentChatIdAtom)
+    if (!currentChatId) return
+    window.desktopApi.claimChat(currentChatId).then((result) => {
+      if (!result.ok) {
+        // Another window already has this chat — clear our selection
+        setSelectedChatId(null)
+      }
+    })
+    // Only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Check if user has existing CLI config (API key or proxy)
   // Based on PR #29 by @sa4hnd
   const { data: cliConfig, isLoading: isLoadingCliConfig } =

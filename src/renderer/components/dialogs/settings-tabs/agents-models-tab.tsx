@@ -1,10 +1,10 @@
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { MoreHorizontal, Plus, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { ChevronDown, MoreHorizontal, Plus, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
-  agentsSettingsDialogOpenAtom,
-  anthropicOnboardingCompletedAtom,
+  agentsLoginModalOpenAtom,
+  claudeLoginModalConfigAtom,
   codexApiKeyAtom,
   codexLoginModalOpenAtom,
   codexOnboardingAuthMethodAtom,
@@ -15,19 +15,25 @@ import {
   openaiApiKeyAtom,
   type CustomClaudeConfig,
 } from "../../../lib/atoms"
+import { ClaudeCodeIcon, CodexIcon, SearchIcon } from "../../ui/icons"
 import { CLAUDE_MODELS, CODEX_MODELS } from "../../../features/agents/lib/models"
 import { trpc } from "../../../lib/trpc"
 import { Badge } from "../../ui/badge"
 import { Button } from "../../ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "../../ui/collapsible"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu"
-import { Checkbox } from "../../ui/checkbox"
 import { Input } from "../../ui/input"
 import { Label } from "../../ui/label"
+import { Switch } from "../../ui/switch"
 
 // Hook to detect narrow screen
 function useIsNarrowScreen(): boolean {
@@ -259,11 +265,9 @@ export function AgentsModelsTab() {
   const [model, setModel] = useState(storedConfig.model)
   const [baseUrl, setBaseUrl] = useState(storedConfig.baseUrl)
   const [token, setToken] = useState(storedConfig.token)
-  const setAnthropicOnboardingCompleted = useSetAtom(
-    anthropicOnboardingCompletedAtom,
-  )
+  const setClaudeLoginModalConfig = useSetAtom(claudeLoginModalConfigAtom)
+  const setClaudeLoginModalOpen = useSetAtom(agentsLoginModalOpenAtom)
   const setCodexLoginModalOpen = useSetAtom(codexLoginModalOpenAtom)
-  const setSettingsOpen = useSetAtom(agentsSettingsDialogOpenAtom)
   const isNarrowScreen = useIsNarrowScreen()
   const { data: claudeCodeIntegration, isLoading: isClaudeCodeLoading } =
     trpc.claudeCode.getIntegration.useQuery()
@@ -340,11 +344,11 @@ export function AgentsModelsTab() {
   const canReset = Boolean(model.trim() || baseUrl.trim() || token.trim())
 
   const handleClaudeCodeSetup = () => {
-    // Don't disconnect - just open onboarding to add a new account
-    // The previous code was calling disconnectClaudeCode.mutate() which
-    // deleted the active account when users tried to add a new one
-    setSettingsOpen(false)
-    setAnthropicOnboardingCompleted(false)
+    setClaudeLoginModalConfig({
+      hideCustomModelSettingsLink: true,
+      autoStartAuth: true,
+    })
+    setClaudeLoginModalOpen(true)
   }
 
   const handleCodexSetup = () => {
@@ -479,20 +483,88 @@ export function AgentsModelsTab() {
     }
   }
 
+  // All models merged into one list for the top section
+  const allModels = useMemo(() => {
+    const items: { id: string; name: string; provider: "claude" | "codex" }[] = []
+    for (const m of CLAUDE_MODELS) {
+      items.push({ id: m.id, name: `${m.name} ${m.version}`, provider: "claude" })
+    }
+    for (const m of CODEX_MODELS) {
+      items.push({ id: m.id, name: m.name, provider: "codex" })
+    }
+    return items
+  }, [])
+
+  const [modelSearch, setModelSearch] = useState("")
+  const filteredModels = useMemo(() => {
+    if (!modelSearch.trim()) return allModels
+    const q = modelSearch.toLowerCase().trim()
+    return allModels.filter((m) => m.name.toLowerCase().includes(q))
+  }, [allModels, modelSearch])
+
+  const [isApiKeysOpen, setIsApiKeysOpen] = useState(false)
+
   return (
     <div className="p-6 space-y-6">
-      {/* Header - hidden on narrow screens since it's in the navigation bar */}
+      {/* Header */}
       {!isNarrowScreen && (
         <div className="flex flex-col space-y-1.5 text-center sm:text-left">
           <h3 className="text-sm font-semibold text-foreground">Models</h3>
-          <p className="text-xs text-muted-foreground">
-            Configure model overrides and Claude Code authentication
-          </p>
         </div>
       )}
 
-      {/* Anthropic Accounts Section */}
+      {/* ===== Models Section ===== */}
       <div className="space-y-2">
+        <div className="bg-background rounded-lg border border-border overflow-hidden">
+          {/* Search */}
+          <div className="px-1.5 pt-1.5 pb-0.5">
+            <div className="flex items-center gap-1.5 h-7 px-1.5 rounded-md bg-muted/50">
+              <SearchIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <input
+                value={modelSearch}
+                onChange={(e) => setModelSearch(e.target.value)}
+                placeholder="Add or search model"
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+          </div>
+
+          {/* Model list */}
+          <div className="divide-y divide-border">
+            {filteredModels.map((m) => {
+              const isEnabled = !hiddenModels.includes(m.id)
+              return (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between px-4 py-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{m.name}</span>
+                    {m.provider === "claude" ? (
+                      <ClaudeCodeIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <CodexIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </div>
+                  <Switch
+                    checked={isEnabled}
+                    onCheckedChange={() => toggleModelVisibility(m.id)}
+                  />
+                </div>
+              )
+            })}
+            {filteredModels.length === 0 && (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                No models found
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ===== Accounts Section ===== */}
+      <div className="space-y-2">
+        {/* Anthropic Accounts */}
         <div className="pb-2 flex items-center justify-between">
           <div>
             <h4 className="text-sm font-medium text-foreground">
@@ -574,224 +646,165 @@ export function AgentsModelsTab() {
                   )}
                 </div>
               </div>
-
-              <div className="flex items-center justify-between gap-6 p-4 border-t border-border">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <Label className="text-sm font-medium">Codex API Key</Label>
-                    {hasAppCodexApiKey && (
-                      <Badge variant="secondary" className="text-xs">
-                        Active
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Takes priority over subscription
-                  </p>
-                </div>
-                <div className="flex-shrink-0 w-80 flex items-center gap-2">
-                  <Input
-                    type="password"
-                    value={codexApiKey}
-                    onChange={(e) => setCodexApiKey(e.target.value)}
-                    onBlur={handleCodexApiKeyBlur}
-                    className="w-full font-mono"
-                    placeholder="sk-..."
-                  />
-                  {hasAppCodexApiKey && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => void handleRemoveCodexApiKey()}
-                      disabled={isSavingCodexApiKey}
-                      aria-label="Remove Codex API key"
-                      className="text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
             </>
           )}
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="pb-2 flex items-center justify-between">
-          <h4 className="text-sm font-medium text-foreground">
-            Override Model
-          </h4>
-          {canReset && (
-            <Button variant="ghost" size="sm" onClick={handleReset} className="text-muted-foreground hover:text-red-600 hover:bg-red-500/10">
-              Reset
-            </Button>
-          )}
-        </div>
-        <div className="bg-background rounded-lg border border-border overflow-hidden">
-          <div className="flex items-center justify-between p-4">
-            <div className="flex-1">
-              <Label className="text-sm font-medium">Model name</Label>
-              <p className="text-xs text-muted-foreground">
-                Model identifier to use for requests
-              </p>
-            </div>
-            <div className="flex-shrink-0 w-80">
-              <Input
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                onBlur={handleBlurSave}
-                className="w-full"
-                placeholder="claude-3-7-sonnet-20250219"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-4 border-t border-border">
-            <div className="flex-1">
-              <Label className="text-sm font-medium">API token</Label>
-              <p className="text-xs text-muted-foreground">
-                ANTHROPIC_AUTH_TOKEN env
-              </p>
-            </div>
-            <div className="flex-shrink-0 w-80">
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                onBlur={handleBlurSave}
-                className="w-full"
-                placeholder="sk-ant-..."
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-4 border-t border-border">
-            <div className="flex-1">
-              <Label className="text-sm font-medium">Base URL</Label>
-              <p className="text-xs text-muted-foreground">
-                ANTHROPIC_BASE_URL env
-              </p>
-            </div>
-            <div className="flex-shrink-0 w-80">
-              <Input
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                onBlur={handleBlurSave}
-                className="w-full"
-                placeholder="https://api.anthropic.com"
-              />
+      {/* ===== API Keys Section (Collapsible) ===== */}
+      <Collapsible open={isApiKeysOpen} onOpenChange={setIsApiKeysOpen}>
+        <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors">
+          <ChevronDown className={`h-4 w-4 transition-transform ${isApiKeysOpen ? "" : "-rotate-90"}`} />
+          API Keys
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-4 pt-3">
+          {/* Codex API Key */}
+          <div className="bg-background rounded-lg border border-border overflow-hidden">
+            <div className="flex items-center justify-between gap-6 p-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium">Codex API Key</Label>
+                  {hasAppCodexApiKey && (
+                    <Badge variant="secondary" className="text-xs">
+                      Active
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Takes priority over subscription
+                </p>
+              </div>
+              <div className="flex-shrink-0 w-80 flex items-center gap-2">
+                <Input
+                  type="password"
+                  value={codexApiKey}
+                  onChange={(e) => setCodexApiKey(e.target.value)}
+                  onBlur={handleCodexApiKeyBlur}
+                  className="w-full font-mono"
+                  placeholder="sk-..."
+                />
+                {hasAppCodexApiKey && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => void handleRemoveCodexApiKey()}
+                    disabled={isSavingCodexApiKey}
+                    aria-label="Remove Codex API key"
+                    className="text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
-        </div>
-      </div>
-
-      {/* OpenAI API Key for Voice Input */}
-      <div className="space-y-2">
-        <div className="pb-2 flex items-center justify-between">
-          <h4 className="text-sm font-medium text-foreground">Voice Input</h4>
-          {canResetOpenAI && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleResetOpenAI}
-              disabled={setOpenAIKeyMutation.isPending}
-              className="text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
-            >
-              Remove
-            </Button>
-          )}
-        </div>
-
-        <div className="bg-background rounded-lg border border-border overflow-hidden">
-          <div className="flex items-center justify-between gap-6 p-4">
-            <div className="flex-1">
-              <Label className="text-sm font-medium">OpenAI API Key</Label>
-              <p className="text-xs text-muted-foreground">
-                Required for voice transcription (Whisper API). Free users need their own key.
-              </p>
-            </div>
-            <div className="flex-shrink-0 w-80">
-              <Input
-                type="password"
-                value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
-                onBlur={handleSaveOpenAI}
-                className="w-full"
-                placeholder="sk-..."
-              />
+          {/* OpenAI API Key for Voice Input */}
+          <div className="bg-background rounded-lg border border-border overflow-hidden">
+            <div className="flex items-center justify-between gap-6 p-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium">OpenAI API Key</Label>
+                  {canResetOpenAI && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleResetOpenAI}
+                      disabled={setOpenAIKeyMutation.isPending}
+                      className="h-5 px-1.5 text-xs text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Required for voice transcription (Whisper API)
+                </p>
+              </div>
+              <div className="flex-shrink-0 w-80">
+                <Input
+                  type="password"
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  onBlur={handleSaveOpenAI}
+                  className="w-full"
+                  placeholder="sk-..."
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Visible Models Section */}
-      {(isClaudeCodeConnected || isCodexSubscriptionConnected || hasAppCodexApiKey) && (
-        <div className="space-y-2">
-          <div className="pb-2">
-            <h4 className="text-sm font-medium text-foreground">
-              Visible Models
-            </h4>
-            <p className="text-xs text-muted-foreground">
-              Choose which models appear in the model selector
-            </p>
-          </div>
-
-          <div className="bg-background rounded-lg border border-border overflow-hidden divide-y divide-border">
-            {/* Claude Code models */}
-            {isClaudeCodeConnected && (
-              <div className="px-4 py-2.5">
-                <div className="text-xs font-medium text-muted-foreground mb-2">Claude Code</div>
-                <div className="space-y-2">
-                  {CLAUDE_MODELS.map((model) => {
-                    const isVisible = !hiddenModels.includes(model.id)
-                    return (
-                      <label
-                        key={model.id}
-                        className="flex items-center gap-2.5 cursor-pointer"
-                      >
-                        <Checkbox
-                          checked={isVisible}
-                          onCheckedChange={() => toggleModelVisibility(model.id)}
-                        />
-                        <span className="text-sm">
-                          {model.name}{" "}
-                          <span className="text-muted-foreground">{model.version}</span>
-                        </span>
-                      </label>
-                    )
-                  })}
+          {/* Override Model */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium text-foreground">
+                Override Model
+              </h4>
+              {canReset && (
+                <Button variant="ghost" size="sm" onClick={handleReset} className="text-muted-foreground hover:text-red-600 hover:bg-red-500/10">
+                  Reset
+                </Button>
+              )}
+            </div>
+            <div className="bg-background rounded-lg border border-border overflow-hidden">
+              <div className="flex items-center justify-between p-4">
+                <div className="flex-1">
+                  <Label className="text-sm font-medium">Model name</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Model identifier to use for requests
+                  </p>
+                </div>
+                <div className="flex-shrink-0 w-80">
+                  <Input
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    onBlur={handleBlurSave}
+                    className="w-full"
+                    placeholder="claude-3-7-sonnet-20250219"
+                  />
                 </div>
               </div>
-            )}
 
-            {/* Codex models */}
-            {(isCodexSubscriptionConnected || hasAppCodexApiKey) && (
-              <div className="px-4 py-2.5">
-                <div className="text-xs font-medium text-muted-foreground mb-2">OpenAI Codex</div>
-                <div className="space-y-2">
-                  {CODEX_MODELS.map((model) => {
-                    const isVisible = !hiddenModels.includes(model.id)
-                    return (
-                      <label
-                        key={model.id}
-                        className="flex items-center gap-2.5 cursor-pointer"
-                      >
-                        <Checkbox
-                          checked={isVisible}
-                          onCheckedChange={() => toggleModelVisibility(model.id)}
-                        />
-                        <span className="text-sm">{model.name}</span>
-                      </label>
-                    )
-                  })}
+              <div className="flex items-center justify-between p-4 border-t border-border">
+                <div className="flex-1">
+                  <Label className="text-sm font-medium">API token</Label>
+                  <p className="text-xs text-muted-foreground">
+                    ANTHROPIC_AUTH_TOKEN env
+                  </p>
+                </div>
+                <div className="flex-shrink-0 w-80">
+                  <Input
+                    type="password"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    onBlur={handleBlurSave}
+                    className="w-full"
+                    placeholder="sk-ant-..."
+                  />
                 </div>
               </div>
-            )}
+
+              <div className="flex items-center justify-between p-4 border-t border-border">
+                <div className="flex-1">
+                  <Label className="text-sm font-medium">Base URL</Label>
+                  <p className="text-xs text-muted-foreground">
+                    ANTHROPIC_BASE_URL env
+                  </p>
+                </div>
+                <div className="flex-shrink-0 w-80">
+                  <Input
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    onBlur={handleBlurSave}
+                    className="w-full"
+                    placeholder="https://api.anthropic.com"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }

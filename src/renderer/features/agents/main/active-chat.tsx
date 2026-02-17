@@ -127,6 +127,8 @@ import {
   pendingAuthRetryMessageAtom,
   pendingBuildPlanSubChatIdAtom,
   pendingConflictResolutionMessageAtom,
+  pendingChatHistoryAtom,
+  type PendingChatHistory,
   pendingMentionAtom,
   pendingPlanApprovalsAtom,
   pendingPrMessageAtom,
@@ -140,6 +142,7 @@ import {
   selectedDiffFilePathAtom,
   setLoading,
   subChatFilesAtom,
+  agentsSidebarOpenAtom,
   subChatModeAtomFamily,
   suppressInputFocusAtom,
   undoStackAtom,
@@ -163,6 +166,7 @@ import { usePastedTextFiles, type PastedTextFile } from "../hooks/use-pasted-tex
 import { useTextContextSelection } from "../hooks/use-text-context-selection"
 import { useToggleFocusOnCmdEsc } from "../hooks/use-toggle-focus-on-cmd-esc"
 import { ACPChatTransport } from "../lib/acp-chat-transport"
+import { formatHistoryForContext } from "../lib/export-chat"
 import {
   clearSubChatDraft,
   getSubChatDraftFull
@@ -2297,11 +2301,21 @@ const ChatViewInner = memo(function ChatViewInner({
   const {
     pastedTexts,
     addPastedText,
+    addChatHistoryFile,
     removePastedText,
     clearPastedTexts,
     pastedTextsRef,
     setPastedTextsFromDraft,
   } = usePastedTextFiles(subChatId)
+
+  // Consume pending chat history file when this sub-chat is the target
+  useEffect(() => {
+    const pending = appStore.get(pendingChatHistoryAtom)
+    if (pending && pending.subChatId === subChatId) {
+      addChatHistoryFile(pending.file)
+      appStore.set(pendingChatHistoryAtom, null)
+    }
+  }, [subChatId, addChatHistoryFile])
 
   // File contents cache - stores content for file mentions (keyed by mentionId)
   // This content gets added to the prompt when sending, without showing a separate card
@@ -3857,12 +3871,12 @@ const ChatViewInner = memo(function ChatViewInner({
         return `@[${MENTION_PREFIXES.DIFF}${dtc.filePath}:${lineNum}:${preview}:${encodedText}]`
       })
 
-      // Add pasted text as pasted mentions (format: pasted:size:preview|filepath)
+      // Add pasted text / chat history as mentions (format: prefix:size:preview|filepath)
       // Using | as separator since filepath can contain colons
       const pastedTextMentions = currentPastedTexts.map((pt) => {
-        // Sanitize preview to remove special characters that break mention parsing
         const sanitizedPreview = pt.preview.replace(/[:\[\]|]/g, "")
-        return `@[${MENTION_PREFIXES.PASTED}${pt.size}:${sanitizedPreview}|${pt.filePath}]`
+        const prefix = pt.kind === "chatHistory" ? MENTION_PREFIXES.CHAT_HISTORY : MENTION_PREFIXES.PASTED
+        return `@[${prefix}${pt.size}:${sanitizedPreview}|${pt.filePath}]`
       })
 
       mentionPrefix = [...quoteMentions, ...diffMentions, ...pastedTextMentions].join(" ") + " "
@@ -4015,11 +4029,12 @@ const ChatViewInner = memo(function ChatViewInner({
         mentionPrefix += diffMentions.join(" ") + " "
       }
 
-      // Add pasted text as pasted mentions
+      // Add pasted text / chat history as mentions
       if (item.pastedTexts && item.pastedTexts.length > 0) {
         const pastedMentions = item.pastedTexts.map((pt) => {
           const sanitizedPreview = pt.preview.replace(/[:\[\]|]/g, "")
-          return `@[${MENTION_PREFIXES.PASTED}${pt.size}:${sanitizedPreview}|${pt.filePath}]`
+          const prefix = pt.kind === "chatHistory" ? MENTION_PREFIXES.CHAT_HISTORY : MENTION_PREFIXES.PASTED
+          return `@[${prefix}${pt.size}:${sanitizedPreview}|${pt.filePath}]`
         })
         mentionPrefix += pastedMentions.join(" ") + " "
       }
@@ -4423,6 +4438,71 @@ const ChatViewInner = memo(function ChatViewInner({
     [onProviderChange, subChatId],
   )
 
+  // Continue conversation with a different provider - creates new sub-chat with history attachment
+  const isContinuingRef = useRef(false)
+  const handleContinueWithProvider = useCallback(
+    async (targetProvider: "claude-code" | "codex") => {
+      if (isStreaming || isContinuingRef.current) return
+      if (!messages || messages.length === 0) return
+      isContinuingRef.current = true
+
+      try {
+        // 1. Format current messages as markdown
+        const historyMarkdown = formatHistoryForContext(messages as any)
+
+        // 2. Save to disk via writePastedText endpoint
+        const result = await trpcClient.files.writePastedText.mutate({
+          subChatId,
+          text: historyMarkdown,
+        })
+
+        // 3. Create new sub-chat
+        const newSubChat = await trpcClient.chats.createSubChat.mutate({
+          chatId: parentChatId,
+          name: "New Chat",
+          mode: subChatMode,
+        })
+
+        const newId = newSubChat.id
+
+        // 4. Store pending chat history for the new sub-chat to consume on mount
+        const historyFile: PendingChatHistory["file"] = {
+          id: `chatHistory_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          filePath: result.filePath,
+          filename: result.filename,
+          size: result.size,
+          preview: "Previous Chat",
+          createdAt: new Date(),
+          kind: "chatHistory",
+        }
+        appStore.set(pendingChatHistoryAtom, { subChatId: newId, file: historyFile })
+
+        // 5. Update Zustand store and switch to new tab
+        const store = useAgentSubChatStore.getState()
+        store.addToAllSubChats({
+          id: newId,
+          name: "New Chat",
+          created_at: new Date().toISOString(),
+          mode: subChatMode,
+        })
+        appStore.set(subChatModeAtomFamily(newId), subChatMode)
+        store.addToOpenSubChats(newId)
+        store.setActiveSubChat(newId)
+
+        // 6. Set provider override AFTER tab switch so the outer component picks it up
+        // We call onProviderChange which sets subChatProviderOverrides in the outer scope
+        // The new sub-chat has 0 messages so the guard in handleProviderChange will pass
+        onProviderChange?.(newId, targetProvider)
+      } catch (error) {
+        console.error("[handleContinueWithProvider] Error:", error)
+        toast.error("Failed to continue with provider")
+      } finally {
+        isContinuingRef.current = false
+      }
+    },
+    [isStreaming, messages, subChatId, parentChatId, subChatMode, onProviderChange],
+  )
+
   return (
     <SearchHighlightProvider>
       <div className="flex flex-col flex-1 min-h-0 relative">
@@ -4629,6 +4709,7 @@ const ChatViewInner = memo(function ChatViewInner({
         onInputContentChange={setInputHasContent}
         onSubmitWithQuestionAnswer={submitWithQuestionAnswerCallback}
         onProviderChange={handleInputProviderChange}
+        onContinueWithProvider={handleContinueWithProvider}
       />
 
         {/* Scroll to bottom button - isolated component to avoid re-renders during streaming */}
@@ -4688,6 +4769,7 @@ export function ChatView({
 
   const isDesktop = useAtomValue(isDesktopAtom)
   const isFullscreen = useAtomValue(isFullscreenAtom)
+  const sidebarOpen = useAtomValue(agentsSidebarOpenAtom)
   const customClaudeConfig = useAtomValue(customClaudeConfigAtom)
   const selectedOllamaModel = useAtomValue(selectedOllamaModelAtom)
   const normalizedCustomClaudeConfig =
@@ -5020,14 +5102,16 @@ export function ChatView({
   }, [isDiffSidebarOpen, diffDisplayMode, isDetailsSidebarOpen, setDiffDisplayMode, setIsDetailsSidebarOpen, setIsDiffSidebarOpen])
 
   // Hide/show traffic lights based on full-page diff or full-page file viewer
+  // When exiting full-page mode, restore based on sidebar state (not unconditionally true)
   useEffect(() => {
     if (!isDesktop || isFullscreen) return
     if (typeof window === "undefined" || !window.desktopApi?.setTrafficLightVisibility) return
 
     const isFullPageDiff = isDiffSidebarOpen && diffDisplayMode === "full-page"
     const isFullPageFileViewer = !!fileViewerPath && fileViewerDisplayMode === "full-page"
-    window.desktopApi.setTrafficLightVisibility(!isFullPageDiff && !isFullPageFileViewer)
-  }, [isDiffSidebarOpen, diffDisplayMode, fileViewerPath, fileViewerDisplayMode, isDesktop, isFullscreen])
+    const shouldHide = isFullPageDiff || isFullPageFileViewer
+    window.desktopApi.setTrafficLightVisibility(shouldHide ? false : sidebarOpen)
+  }, [isDiffSidebarOpen, diffDisplayMode, fileViewerPath, fileViewerDisplayMode, isDesktop, isFullscreen, sidebarOpen])
 
   // Track diff sidebar width for responsive header
   const storedDiffSidebarWidth = useAtomValue(agentsDiffSidebarWidthAtom)

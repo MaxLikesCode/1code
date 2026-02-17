@@ -196,6 +196,8 @@ export interface ChatInputAreaProps {
   onSubmitWithQuestionAnswer?: () => void
   // Callback to switch provider for brand new (empty) sub-chats
   onProviderChange?: (provider: "claude-code" | "codex") => void
+  // Callback to continue chat with a different provider (creates new sub-chat with history)
+  onContinueWithProvider?: (provider: "claude-code" | "codex") => void
 }
 
 /**
@@ -248,6 +250,7 @@ function arePropsEqual(prevProps: ChatInputAreaProps, nextProps: ChatInputAreaPr
     prevProps.onInputContentChange !== nextProps.onInputContentChange ||
     prevProps.onSubmitWithQuestionAnswer !== nextProps.onSubmitWithQuestionAnswer ||
     prevProps.onProviderChange !== nextProps.onProviderChange ||
+    prevProps.onContinueWithProvider !== nextProps.onContinueWithProvider ||
     prevProps.onSendFromQueue !== nextProps.onSendFromQueue
   ) {
     return false
@@ -397,6 +400,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   onInputContentChange,
   onSubmitWithQuestionAnswer,
   onProviderChange,
+  onContinueWithProvider,
 }: ChatInputAreaProps) {
   // Local state - changes here don't re-render parent
   const [hasContent, setHasContent] = useState(false)
@@ -466,6 +470,8 @@ export const ChatInputArea = memo(function ChatInputArea({
   const anthropicOnboardingCompleted = useAtomValue(anthropicOnboardingCompletedAtom)
   const apiKeyOnboardingCompleted = useAtomValue(apiKeyOnboardingCompletedAtom)
   const codexOnboardingCompleted = useAtomValue(codexOnboardingCompletedAtom)
+  const { data: claudeCodeIntegration } =
+    trpc.claudeCode.getIntegration.useQuery()
   const codexUiModels = useMemo(
     () => {
       let models = hasAppCodexApiKey
@@ -520,6 +526,11 @@ export const ChatInputArea = memo(function ChatInputArea({
   const normalizedCustomClaudeConfig =
     normalizeCustomClaudeConfig(customClaudeConfig)
   const hasCustomClaudeConfig = Boolean(normalizedCustomClaudeConfig)
+  const isClaudeConnected =
+    Boolean(claudeCodeIntegration?.isConnected) ||
+    anthropicOnboardingCompleted ||
+    apiKeyOnboardingCompleted ||
+    hasCustomClaudeConfig
 
   // Determine current Ollama model (selected or recommended)
   const currentOllamaModel = selectedOllamaModel || availableModels.recommendedModel || availableModels.ollamaModels[0]
@@ -1243,6 +1254,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                         filename={pt.filename}
                         size={pt.size}
                         preview={pt.preview}
+                        kind={pt.kind}
                         onRemove={onRemovePastedText ? () => onRemovePastedText(pt.id) : undefined}
                       />
                     ))}
@@ -1467,7 +1479,12 @@ export const ChatInputArea = memo(function ChatInputArea({
                         onProviderChange?.(nextProvider)
                       }}
                       allowProviderSwitch={canSwitchProvider}
+                      onContinueWithProvider={!canSwitchProvider ? onContinueWithProvider : undefined}
                       selectedModelLabel={selectedModelLabel}
+                      onOpenModelsSettings={() => {
+                        setSettingsTab("models")
+                        setSettingsOpen(true)
+                      }}
                       claude={{
                         models: availableModels.models.filter((m) => !hiddenModels.includes(m.id)),
                         selectedModelId: selectedModel?.id,
@@ -1485,7 +1502,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                         selectedOllamaModel: currentOllamaModel,
                         recommendedOllamaModel: availableModels.recommendedModel,
                         onSelectOllamaModel: setSelectedOllamaModel,
-                        isConnected: anthropicOnboardingCompleted || apiKeyOnboardingCompleted || hasCustomClaudeConfig,
+                        isConnected: isClaudeConnected,
                         thinkingEnabled,
                         onThinkingChange: setThinkingEnabled,
                       }}

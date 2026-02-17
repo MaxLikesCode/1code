@@ -1,20 +1,24 @@
 "use client"
 
-import { Brain, Zap } from "lucide-react"
+import { Brain, ChevronRight, Zap } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../../../components/ui/dropdown-menu"
-import {
-  CheckIcon,
-  ClaudeCodeIcon,
-  IconChevronDown,
-  ThinkingIcon,
-} from "../../../components/ui/icons"
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "../../../components/ui/command"
+import { CheckIcon, ClaudeCodeIcon, IconChevronDown, ThinkingIcon } from "../../../components/ui/icons"
 import { Switch } from "../../../components/ui/switch"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../../../components/ui/popover"
 import { cn } from "../../../lib/utils"
 import type { CodexThinkingLevel } from "../lib/models"
 import { formatCodexThinkingLabel } from "../lib/models"
@@ -48,6 +52,8 @@ interface AgentModelSelectorProps {
   allowProviderSwitch?: boolean
   triggerClassName?: string
   contentClassName?: string
+  onOpenModelsSettings?: () => void
+  onContinueWithProvider?: (provider: AgentProviderId) => void
   claude: {
     models: ClaudeModelOption[]
     selectedModelId?: string
@@ -72,6 +78,128 @@ interface AgentModelSelectorProps {
   }
 }
 
+type FlatModelItem =
+  | { type: "claude"; model: ClaudeModelOption }
+  | { type: "codex"; model: CodexModelOption }
+  | { type: "ollama"; modelName: string; isRecommended: boolean }
+  | { type: "custom" }
+
+function CodexThinkingSubMenu({
+  thinkings,
+  selectedThinking,
+  onSelectThinking,
+}: {
+  thinkings: CodexThinkingLevel[]
+  selectedThinking: CodexThinkingLevel
+  onSelectThinking: (thinking: CodexThinkingLevel) => void
+}) {
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const subMenuRef = useRef<HTMLDivElement>(null)
+  const [showSub, setShowSub] = useState(false)
+  const [subPos, setSubPos] = useState({ top: 0, left: 0 })
+  const closeTimeout = useRef<ReturnType<typeof setTimeout>>()
+
+  const scheduleClose = useCallback(() => {
+    closeTimeout.current = setTimeout(() => setShowSub(false), 150)
+  }, [])
+
+  const cancelClose = useCallback(() => {
+    clearTimeout(closeTimeout.current)
+  }, [])
+
+  const handleTriggerEnter = useCallback(() => {
+    cancelClose()
+    if (triggerRef.current) {
+      const triggerRect = triggerRef.current.getBoundingClientRect()
+      const popoverEl = triggerRef.current.closest(
+        "[data-radix-popper-content-wrapper] > *",
+      )
+      setSubPos({
+        top: triggerRect.top - 4,
+        left: triggerRect.right + 6,
+      })
+    }
+    setShowSub(true)
+  }, [cancelClose])
+
+  const handleTriggerLeave = useCallback(
+    (e: React.MouseEvent) => {
+      const related = e.relatedTarget as Node | null
+      if (subMenuRef.current?.contains(related)) return
+      scheduleClose()
+    },
+    [scheduleClose],
+  )
+
+  const handleSubLeave = useCallback(
+    (e: React.MouseEvent) => {
+      const related = e.relatedTarget as Node | null
+      if (triggerRef.current?.contains(related)) return
+      scheduleClose()
+    },
+    [scheduleClose],
+  )
+
+  useEffect(() => {
+    return () => clearTimeout(closeTimeout.current)
+  }, [])
+
+  return (
+    <div className="py-1">
+      <div
+        ref={triggerRef}
+        onMouseEnter={handleTriggerEnter}
+        onMouseLeave={handleTriggerLeave}
+        className={cn(
+          "flex items-center justify-between gap-1.5 min-h-[32px] py-[5px] px-1.5 mx-1 rounded-md text-sm cursor-default select-none outline-none transition-colors",
+          showSub
+            ? "dark:bg-neutral-800 bg-accent text-foreground"
+            : "dark:hover:bg-neutral-800 hover:text-foreground",
+        )}
+      >
+        <div className="flex items-center gap-1.5">
+          <Brain className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span>Thinking</span>
+        </div>
+        <div className="flex items-center gap-1 text-muted-foreground">
+          <span className="text-xs">
+            {formatCodexThinkingLabel(selectedThinking)}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+        </div>
+      </div>
+
+      {showSub &&
+        createPortal(
+          <div
+            ref={subMenuRef}
+            onMouseEnter={cancelClose}
+            onMouseLeave={handleSubLeave}
+            className="fixed z-50 min-w-[180px] overflow-auto rounded-[10px] border border-border bg-popover text-sm text-popover-foreground shadow-lg py-1 animate-in fade-in-0 zoom-in-95 slide-in-from-left-2"
+            style={{ top: subPos.top, left: subPos.left }}
+          >
+            {thinkings.map((thinking) => {
+              const isSelected = selectedThinking === thinking
+              return (
+                <button
+                  key={thinking}
+                  onClick={() => onSelectThinking(thinking)}
+                  className="flex items-center justify-between gap-4 min-h-[32px] py-[5px] px-1.5 mx-1 w-[calc(100%-8px)] rounded-md text-sm cursor-default select-none outline-none dark:hover:bg-neutral-800 hover:text-foreground transition-colors"
+                >
+                  <span>{formatCodexThinkingLabel(thinking)}</span>
+                  {isSelected && (
+                    <CheckIcon className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                </button>
+              )
+            })}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
+
 export function AgentModelSelector({
   open,
   onOpenChange,
@@ -81,15 +209,74 @@ export function AgentModelSelector({
   allowProviderSwitch = true,
   triggerClassName,
   contentClassName,
+  onOpenModelsSettings,
+  onContinueWithProvider,
   claude,
   codex,
 }: AgentModelSelectorProps) {
-  const showClaudeGroup = (allowProviderSwitch || selectedAgentId === "claude-code") && claude.isConnected
-  const showCodexGroup = (allowProviderSwitch || selectedAgentId === "codex") && codex.isConnected
+  const [search, setSearch] = useState("")
+
   const canSelectProvider = (provider: AgentProviderId) =>
     allowProviderSwitch || selectedAgentId === provider
 
-  const selectedCodexModel = codex.models.find((m) => m.id === codex.selectedModelId) || codex.models[0]
+  // Build flat list of all models (show all regardless of connection status)
+  const allModels = useMemo<FlatModelItem[]>(() => {
+    const items: FlatModelItem[] = []
+
+    if (claude.isOffline && claude.ollamaModels.length > 0) {
+      for (const m of claude.ollamaModels) {
+        items.push({
+          type: "ollama",
+          modelName: m,
+          isRecommended: m === claude.recommendedOllamaModel,
+        })
+      }
+    } else if (claude.hasCustomModelConfig) {
+      items.push({ type: "custom" })
+    } else {
+      for (const m of claude.models) {
+        items.push({ type: "claude", model: m })
+      }
+    }
+
+    for (const m of codex.models) {
+      items.push({ type: "codex", model: m })
+    }
+
+    return items
+  }, [claude, codex])
+
+  // Filter by search
+  const filteredModels = useMemo(() => {
+    if (!search.trim()) return allModels
+    const q = search.toLowerCase().trim()
+    return allModels.filter((item) => {
+      switch (item.type) {
+        case "claude":
+          return (
+            item.model.name.toLowerCase().includes(q) ||
+            item.model.version.toLowerCase().includes(q) ||
+            `${item.model.name} ${item.model.version}`.toLowerCase().includes(q)
+          )
+        case "codex":
+          return item.model.name.toLowerCase().includes(q)
+        case "ollama":
+          return item.modelName.toLowerCase().includes(q)
+        case "custom":
+          return "custom model".includes(q)
+      }
+    })
+  }, [allModels, search])
+
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      onOpenChange(nextOpen)
+      if (!nextOpen) {
+        setSearch("")
+      }
+    },
+    [onOpenChange],
+  )
 
   const triggerIcon =
     selectedAgentId === "claude-code" &&
@@ -102,9 +289,111 @@ export function AgentModelSelector({
       <ClaudeCodeIcon className="h-3.5 w-3.5" />
     )
 
+  const isItemSelected = (item: FlatModelItem): boolean => {
+    switch (item.type) {
+      case "claude":
+        return selectedAgentId === "claude-code" && claude.selectedModelId === item.model.id
+      case "codex":
+        return selectedAgentId === "codex" && codex.selectedModelId === item.model.id
+      case "ollama":
+        return selectedAgentId === "claude-code" && claude.selectedOllamaModel === item.modelName
+      case "custom":
+        return selectedAgentId === "claude-code"
+    }
+  }
+
+  const getItemProvider = (item: FlatModelItem): AgentProviderId => {
+    return item.type === "codex" ? "codex" : "claude-code"
+  }
+
+  const isItemDisabled = (item: FlatModelItem): boolean => {
+    const provider = getItemProvider(item)
+    if (canSelectProvider(provider)) return false
+    // When onContinueWithProvider is available, cross-provider items are clickable (not disabled)
+    if (onContinueWithProvider) return false
+    return true
+  }
+
+  const isItemCrossProvider = (item: FlatModelItem): boolean => {
+    return !canSelectProvider(getItemProvider(item)) && !!onContinueWithProvider
+  }
+
+  const handleItemClick = (item: FlatModelItem) => {
+    const provider = getItemProvider(item)
+
+    // Cross-provider click → continue with provider in new sub-chat
+    if (!canSelectProvider(provider) && onContinueWithProvider) {
+      onContinueWithProvider(provider)
+      handleOpenChange(false)
+      return
+    }
+
+    switch (item.type) {
+      case "claude":
+        if (!canSelectProvider("claude-code")) return
+        onSelectedAgentIdChange("claude-code")
+        claude.onSelectModel(item.model.id)
+        break
+      case "codex":
+        if (!canSelectProvider("codex")) return
+        onSelectedAgentIdChange("codex")
+        codex.onSelectModel(item.model.id)
+        break
+      case "ollama":
+        if (!canSelectProvider("claude-code")) return
+        onSelectedAgentIdChange("claude-code")
+        claude.onSelectOllamaModel(item.modelName)
+        break
+      case "custom":
+        if (!canSelectProvider("claude-code")) return
+        onSelectedAgentIdChange("claude-code")
+        break
+    }
+    handleOpenChange(false)
+  }
+
+  const getItemIcon = (item: FlatModelItem) => {
+    switch (item.type) {
+      case "claude":
+        return <ClaudeCodeIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      case "codex":
+        return <CodexIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      case "ollama":
+        return <Zap className="h-4 w-4 text-muted-foreground shrink-0" />
+      case "custom":
+        return <ClaudeCodeIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+    }
+  }
+
+  const getItemLabel = (item: FlatModelItem): string => {
+    switch (item.type) {
+      case "claude":
+        return `${item.model.name} ${item.model.version}`
+      case "codex":
+        return item.model.name
+      case "ollama":
+        return item.modelName + (item.isRecommended ? " (recommended)" : "")
+      case "custom":
+        return "Custom Model"
+    }
+  }
+
+  const getItemKey = (item: FlatModelItem): string => {
+    switch (item.type) {
+      case "claude":
+        return `claude-${item.model.id}`
+      case "codex":
+        return `codex-${item.model.id}`
+      case "ollama":
+        return `ollama-${item.modelName}`
+      case "custom":
+        return "custom"
+    }
+  }
+
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
         <button
           className={cn(
             "flex items-center gap-1.5 px-2 py-1 text-sm text-muted-foreground transition-[background-color,color] duration-150 ease-out rounded-md outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70",
@@ -116,187 +405,105 @@ export function AgentModelSelector({
           <span className="truncate">{selectedModelLabel}</span>
           <IconChevronDown className="h-3 w-3 shrink-0 opacity-50" />
         </button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent
+      </PopoverTrigger>
+      <PopoverContent
+        className={cn("w-64 p-0", contentClassName)}
         align="start"
-        className={cn(
-          "w-[280px] max-h-[400px] overflow-y-auto",
-          contentClassName,
-        )}
       >
-        {showClaudeGroup && (
-          <>
-            <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground">
-              Claude Code
-            </div>
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Search models..."
+            value={search}
+            onValueChange={setSearch}
+          />
 
-            {claude.isOffline && claude.ollamaModels.length > 0 ? (
-              claude.ollamaModels.map((model) => {
-                const isSelected =
-                  selectedAgentId === "claude-code" &&
-                  claude.selectedOllamaModel === model
-                const isRecommended = model === claude.recommendedOllamaModel
-                return (
-                  <DropdownMenuItem
-                    key={model}
-                    disabled={!canSelectProvider("claude-code")}
-                    onClick={() => {
-                      if (!canSelectProvider("claude-code")) return
-                      onSelectedAgentIdChange("claude-code")
-                      claude.onSelectOllamaModel(model)
-                    }}
-                    className="gap-2 justify-between"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <Zap className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span>
-                        {model}
-                        {isRecommended && (
-                          <span className="text-muted-foreground ml-1">
-                            (recommended)
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    {isSelected && <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
-                  </DropdownMenuItem>
-                )
-              })
-            ) : claude.hasCustomModelConfig ? (
-              <DropdownMenuItem
-                disabled={!canSelectProvider("claude-code")}
-                onClick={() => {
-                  if (!canSelectProvider("claude-code")) return
-                  onSelectedAgentIdChange("claude-code")
-                }}
-                className="gap-2 justify-between"
+          {/* Claude thinking toggle */}
+          {selectedAgentId === "claude-code" &&
+            !claude.isOffline &&
+            !claude.hasCustomModelConfig && (
+            <>
+              <div
+                className="flex items-center justify-between min-h-[32px] py-[5px] px-1.5 mx-1"
+                onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center gap-1.5">
-                  <ClaudeCodeIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span>Custom Model</span>
+                  <ThinkingIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="text-sm">Thinking</span>
                 </div>
-                {selectedAgentId === "claude-code" && (
-                  <CheckIcon className="h-3.5 w-3.5 shrink-0" />
-                )}
-              </DropdownMenuItem>
-            ) : (
-              claude.models.map((model) => {
-                const isSelected =
-                  selectedAgentId === "claude-code" &&
-                  claude.selectedModelId === model.id
-                return (
-                  <DropdownMenuItem
-                    key={model.id}
-                    disabled={!canSelectProvider("claude-code")}
-                    onClick={() => {
-                      if (!canSelectProvider("claude-code")) return
-                      onSelectedAgentIdChange("claude-code")
-                      claude.onSelectModel(model.id)
-                    }}
-                    className="gap-2 justify-between"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <ClaudeCodeIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      <span>
-                        {model.name}{" "}
-                        <span className="text-muted-foreground">{model.version}</span>
-                      </span>
-                    </div>
-                    {isSelected && <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
-                  </DropdownMenuItem>
-                )
-              })
-            )}
+                <Switch
+                  checked={claude.thinkingEnabled}
+                  onCheckedChange={claude.onThinkingChange}
+                  className="scale-75"
+                />
+              </div>
+              <CommandSeparator />
+            </>
+          )}
 
-            {/* Claude thinking toggle inside dropdown */}
-            {selectedAgentId === "claude-code" &&
-              !claude.isOffline &&
-              !claude.hasCustomModelConfig && (
+          {/* Codex thinking level selector with hover sub-menu */}
+          {selectedAgentId === "codex" && (() => {
+            const selectedCodexModel = codex.models.find((m) => m.id === codex.selectedModelId) || codex.models[0]
+            if (!selectedCodexModel) return null
+            return (
               <>
-                <DropdownMenuSeparator />
-                <div
-                  className="flex items-center justify-between px-1.5 py-1.5 mx-1"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <ThinkingIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-sm">Thinking</span>
-                  </div>
-                  <Switch
-                    checked={claude.thinkingEnabled}
-                    onCheckedChange={claude.onThinkingChange}
-                    className="scale-75"
-                  />
-                </div>
+                <CodexThinkingSubMenu
+                  thinkings={selectedCodexModel.thinkings}
+                  selectedThinking={codex.selectedThinking}
+                  onSelectThinking={codex.onSelectThinking}
+                />
+                <CommandSeparator />
               </>
-            )}
-          </>
-        )}
+            )
+          })()}
 
-        {showClaudeGroup && showCodexGroup && (
-          <DropdownMenuSeparator className="my-1" />
-        )}
-
-        {showCodexGroup && (
-          <>
-            <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground">
-              OpenAI Codex
-            </div>
-
-            {codex.models.map((model) => {
-              const isSelected =
-                selectedAgentId === "codex" && codex.selectedModelId === model.id
-              return (
-                <DropdownMenuItem
-                  key={model.id}
-                  disabled={!canSelectProvider("codex")}
-                  onClick={() => {
-                    if (!canSelectProvider("codex")) return
-                    onSelectedAgentIdChange("codex")
-                    codex.onSelectModel(model.id)
-                  }}
-                  className="gap-2 justify-between"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <CodexIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span>{model.name}</span>
-                  </div>
-                  {isSelected && <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
-                </DropdownMenuItem>
-              )
-            })}
-
-            {/* Thinking level selector inside dropdown */}
-            {selectedAgentId === "codex" && selectedCodexModel && (
-              <>
-                <DropdownMenuSeparator className="my-1" />
-                <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Brain className="h-3 w-3" />
-                  Thinking
-                </div>
-                {selectedCodexModel.thinkings.map((thinking) => {
-                  const isSelected = codex.selectedThinking === thinking
+          <CommandList className="max-h-[300px] overflow-y-auto">
+            {filteredModels.length > 0 ? (
+              <CommandGroup>
+                {filteredModels.map((item) => {
+                  const selected = isItemSelected(item)
+                  const disabled = isItemDisabled(item)
+                  const crossProvider = isItemCrossProvider(item)
                   return (
-                    <DropdownMenuItem
-                      key={thinking}
-                      onClick={() => {
-                        codex.onSelectThinking(thinking)
-                      }}
-                      className="gap-2 justify-between pl-4"
+                    <CommandItem
+                      key={getItemKey(item)}
+                      value={getItemKey(item)}
+                      onSelect={() => handleItemClick(item)}
+                      disabled={disabled}
+                      className={cn("gap-2", crossProvider && "opacity-60")}
                     >
-                      <span>{formatCodexThinkingLabel(thinking)}</span>
-                      {isSelected && (
-                        <CheckIcon className="h-3.5 w-3.5 shrink-0" />
+                      {getItemIcon(item)}
+                      <span className="truncate flex-1">{getItemLabel(item)}</span>
+                      {crossProvider && (
+                        <span className="text-[10px] text-muted-foreground shrink-0">Continue →</span>
                       )}
-                    </DropdownMenuItem>
+                      {selected && (
+                        <CheckIcon className="h-4 w-4 shrink-0" />
+                      )}
+                    </CommandItem>
                   )
                 })}
-              </>
+              </CommandGroup>
+            ) : (
+              <CommandEmpty>No models found.</CommandEmpty>
             )}
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          </CommandList>
+
+          {onOpenModelsSettings && (
+            <div className="border-t border-border/50 py-1">
+              <button
+                onClick={() => {
+                  onOpenModelsSettings()
+                  handleOpenChange(false)
+                }}
+                className="flex items-center gap-1.5 min-h-[32px] py-[5px] px-1.5 mx-1 w-[calc(100%-8px)] rounded-md text-sm cursor-default select-none outline-none dark:hover:bg-neutral-800 hover:text-foreground transition-colors"
+              >
+                <span className="flex-1 text-left">Add Models</span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            </div>
+          )}
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }

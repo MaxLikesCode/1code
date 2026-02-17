@@ -1,6 +1,6 @@
 "use client"
 
-import { Loader2, Plus } from "lucide-react"
+import { Loader2, Plus, Trash2 } from "lucide-react"
 import { Button } from "../../ui/button"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAtomValue } from "jotai"
@@ -11,19 +11,22 @@ import { cn } from "../../../lib/utils"
 import { LoadingDot, OriginalMCPIcon } from "../../ui/icons"
 import { Input } from "../../ui/input"
 import { Label } from "../../ui/label"
+import { Switch } from "../../ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select"
 import { ResizableSidebar } from "../../ui/resizable-sidebar"
 import { selectedProjectAtom, settingsMcpSidebarWidthAtom } from "../../../features/agents/atoms"
 import {
-  AddMcpServerDialog,
-  EditMcpServerDialog,
+  DeleteServerConfirm,
   getStatusText,
   type McpServer,
   type ScopeType,
 } from "./mcp"
 
 // Status indicator dot - exported for reuse in other components
-export function McpStatusDot({ status }: { status: string }) {
+export function McpStatusDot({ status, disabled }: { status: string; disabled?: boolean }) {
+  if (disabled) {
+    return <span className="w-2 h-2 rounded-full bg-muted-foreground/30 shrink-0" />
+  }
   switch (status) {
     case "connected":
       return <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
@@ -56,10 +59,27 @@ function getConnectionInfo(config: Record<string, unknown>) {
 }
 
 // --- Detail Panel ---
-function McpServerDetail({ server, onAuth }: { server: McpServer; onAuth?: () => void }) {
+function McpServerDetail({
+  server,
+  groupName,
+  onAuth,
+  onToggleEnabled,
+  onDelete,
+  isEditable,
+  isToggling,
+}: {
+  server: McpServer
+  groupName: string
+  onAuth?: () => void
+  onToggleEnabled?: (enabled: boolean) => void
+  onDelete?: () => void
+  isEditable: boolean
+  isToggling?: boolean
+}) {
   const { tools, needsAuth } = server
   const hasTools = tools.length > 0
   const isConnected = server.status === "connected"
+  const isDisabled = (server.config as Record<string, unknown>).disabled === true
   const connection = getConnectionInfo(server.config)
 
   return (
@@ -70,10 +90,13 @@ function McpServerDetail({ server, onAuth }: { server: McpServer; onAuth?: () =>
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold text-foreground truncate">{server.name}</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {isConnected
-                ? (hasTools ? `${tools.length} tool${tools.length !== 1 ? "s" : ""}` : "No tools")
-                : getStatusText(server.status)}
+              {isDisabled
+                ? "Disabled"
+                : isConnected
+                  ? (hasTools ? `${tools.length} tool${tools.length !== 1 ? "s" : ""}` : "No tools")
+                  : getStatusText(server.status)}
               {server.serverInfo?.version && ` \u00B7 v${server.serverInfo.version}`}
+              {` \u00B7 ${groupName}`}
             </p>
           </div>
           {needsAuth && onAuth && (
@@ -82,6 +105,23 @@ function McpServerDetail({ server, onAuth }: { server: McpServer; onAuth?: () =>
             </Button>
           )}
         </div>
+
+        {/* Enable/Disable Toggle */}
+        {isEditable && onToggleEnabled && (
+          <div className="flex items-center justify-between">
+            <div>
+              <h5 className="text-xs font-medium text-foreground">Enabled</h5>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Disable to prevent this server from connecting
+              </p>
+            </div>
+            <Switch
+              checked={!isDisabled}
+              onCheckedChange={onToggleEnabled}
+              disabled={isToggling}
+            />
+          </div>
+        )}
 
         {/* Connection Section */}
         <div>
@@ -158,6 +198,21 @@ function McpServerDetail({ server, onAuth }: { server: McpServer; onAuth?: () =>
             </div>
           </div>
         )}
+
+        {/* Delete */}
+        {isEditable && onDelete && (
+          <div className="pt-2 border-t border-border">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+              Delete Server
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -168,10 +223,12 @@ function CreateMcpServerForm({
   onCreated,
   onCancel,
   hasProject,
+  projectName,
 }: {
   onCreated: () => void
   onCancel: () => void
   hasProject: boolean
+  projectName?: string
 }) {
   const addServerMutation = trpc.claude.addMcpServer.useMutation()
   const isSaving = addServerMutation.isPending
@@ -227,6 +284,7 @@ function CreateMcpServerForm({
             placeholder="my-server"
             autoFocus
           />
+          <p className="text-[11px] text-muted-foreground">Letters, numbers, hyphens, and underscores only</p>
         </div>
 
         <div className="space-y-1.5">
@@ -285,7 +343,7 @@ function CreateMcpServerForm({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="global">Global (~/.claude.json)</SelectItem>
-                <SelectItem value="project">Project</SelectItem>
+                <SelectItem value="project">{projectName ? `Project: ${projectName}` : "Project"}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -303,15 +361,15 @@ export function AgentsMcpTab() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const selectedProject = useAtomValue(selectedProjectAtom)
 
-  // Dialog state for Add/Edit MCP server dialogs
-  const [addDialogOpen, setAddDialogOpen] = useState(false)
-  const [editingServer, setEditingServer] = useState<{
+  // Delete confirmation dialog state
+  const [deletingServer, setDeletingServer] = useState<{
     server: McpServer
     scope: ScopeType
     projectPath: string | null
   } | null>(null)
 
   const updateMutation = trpc.claude.updateMcpServer.useMutation()
+  const removeMutation = trpc.claude.removeMcpServer.useMutation()
 
   // Focus search on "/" hotkey
   useEffect(() => {
@@ -470,9 +528,28 @@ export function AgentsMcpTab() {
         projectPath: group.projectPath ?? undefined,
         disabled: !enabled,
       })
+      toast.success(enabled ? "Server enabled" : "Server disabled")
       await handleRefresh(true)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to toggle server"
+      toast.error(message)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deletingServer) return
+    try {
+      await removeMutation.mutateAsync({
+        name: deletingServer.server.name,
+        scope: deletingServer.scope,
+        projectPath: deletingServer.projectPath ?? undefined,
+      })
+      toast.success("Server removed", { description: deletingServer.server.name })
+      setDeletingServer(null)
+      setSelectedServerKey(null)
+      await handleRefresh(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to remove server"
       toast.error(message)
     }
   }
@@ -559,11 +636,17 @@ export function AgentsMcpTab() {
                           <div className="flex items-start gap-2">
                             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                               <div className="flex items-center gap-1">
-                                <span className="truncate block text-sm leading-tight flex-1">
+                                <span className={cn(
+                                  "truncate block text-sm leading-tight flex-1",
+                                  (server.config as Record<string, unknown>).disabled === true && "opacity-50",
+                                )}>
                                   {server.name}
                                 </span>
                                 <div className="flex-shrink-0 w-3.5 h-3.5 flex items-center justify-center">
-                                  <McpStatusDot status={server.status} />
+                                  <McpStatusDot
+                                    status={server.status}
+                                    disabled={(server.config as Record<string, unknown>).disabled === true}
+                                  />
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60 min-w-0">
@@ -572,9 +655,11 @@ export function AgentsMcpTab() {
                                 </span>
                                 {server.status !== "pending" && (
                                   <span className="flex-shrink-0">
-                                    {server.status === "connected"
-                                      ? `${server.tools.length} tool${server.tools.length !== 1 ? "s" : ""}`
-                                      : getStatusText(server.status)}
+                                    {(server.config as Record<string, unknown>).disabled === true
+                                      ? "Disabled"
+                                      : server.status === "connected"
+                                        ? `${server.tools.length} tool${server.tools.length !== 1 ? "s" : ""}`
+                                        : getStatusText(server.status)}
                                   </span>
                                 )}
                               </div>
@@ -599,11 +684,21 @@ export function AgentsMcpTab() {
             onCreated={() => { setShowAddForm(false); handleRefresh(true) }}
             onCancel={() => setShowAddForm(false)}
             hasProject={!!selectedProject?.path}
+            projectName={selectedProject?.name}
           />
         ) : selectedServer ? (
           <McpServerDetail
             server={selectedServer.server}
+            groupName={selectedServer.group.groupName}
             onAuth={() => handleAuth(selectedServer.server.name, selectedServer.group.projectPath)}
+            onToggleEnabled={(enabled) => handleToggleEnabled(selectedServer.server, selectedServer.group, enabled)}
+            onDelete={() => setDeletingServer({
+              server: selectedServer.server,
+              scope: getScopeFromGroup(selectedServer.group.groupName),
+              projectPath: selectedServer.group.projectPath,
+            })}
+            isEditable={isEditableGroup(selectedServer.group.groupName)}
+            isToggling={updateMutation.isPending}
           />
         ) : isLoadingConfig ? (
           <div className="flex items-center justify-center h-full">
@@ -632,19 +727,12 @@ export function AgentsMcpTab() {
         )}
       </div>
 
-      <AddMcpServerDialog
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
-        onServerAdded={() => handleRefresh(true)}
-      />
-      <EditMcpServerDialog
-        open={!!editingServer}
-        onOpenChange={(open) => { if (!open) setEditingServer(null) }}
-        server={editingServer?.server || null}
-        scope={editingServer?.scope || "global"}
-        projectPath={editingServer?.projectPath ?? undefined}
-        onServerUpdated={() => handleRefresh(true)}
-        onServerDeleted={() => handleRefresh(true)}
+      <DeleteServerConfirm
+        open={!!deletingServer}
+        onOpenChange={(open) => { if (!open) setDeletingServer(null) }}
+        serverName={deletingServer?.server.name ?? ""}
+        onConfirm={handleDelete}
+        isDeleting={removeMutation.isPending}
       />
     </div>
   )

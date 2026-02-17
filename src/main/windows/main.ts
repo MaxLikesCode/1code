@@ -208,7 +208,36 @@ function registerIpcHandlers(): void {
 
   // New window - optionally open with specific chat/subchat
   ipcMain.handle("window:new", (_event, options?: { chatId?: string; subChatId?: string }) => {
-    createWindow(options)
+    // If chatId specified, check ownership atomically via focusChatOwner
+    if (options?.chatId && windowManager.focusChatOwner(options.chatId)) {
+      return { blocked: true }
+    }
+
+    const win = createWindow(options)
+
+    // Pre-claim the chat for the new window
+    if (options?.chatId) {
+      windowManager.claimChat(options.chatId, win.id)
+    }
+
+    return { blocked: false }
+  })
+
+  // Chat ownership — prevent same chat open in multiple windows
+  ipcMain.handle("chat:claim", (event, chatId: string) => {
+    const win = getWindowFromEvent(event)
+    if (!win) return { ok: false, ownerStableId: "unknown" }
+    return windowManager.claimChat(chatId, win.id)
+  })
+
+  ipcMain.handle("chat:release", (event, chatId: string) => {
+    const win = getWindowFromEvent(event)
+    if (!win) return
+    windowManager.releaseChat(chatId, win.id)
+  })
+
+  ipcMain.handle("chat:focus-owner", (_event, chatId: string) => {
+    return windowManager.focusChatOwner(chatId)
   })
 
   // Set window title

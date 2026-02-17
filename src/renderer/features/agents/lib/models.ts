@@ -9,22 +9,22 @@ export type CodexThinkingLevel = "low" | "medium" | "high" | "xhigh"
 export const CODEX_MODELS = [
   {
     id: "gpt-5.3-codex",
-    name: "GPT 5.3 Codex",
+    name: "Codex 5.3",
     thinkings: ["low", "medium", "high", "xhigh"] as CodexThinkingLevel[],
   },
   {
-    id: "gpt-5.2",
-    name: "GPT 5.2",
+    id: "gpt-5.2-codex",
+    name: "Codex 5.2",
     thinkings: ["low", "medium", "high", "xhigh"] as CodexThinkingLevel[],
   },
   {
     id: "gpt-5.1-codex-max",
-    name: "GPT 5.1 Codex Max",
+    name: "Codex 5.1 Max",
     thinkings: ["low", "medium", "high", "xhigh"] as CodexThinkingLevel[],
   },
   {
     id: "gpt-5.1-codex-mini",
-    name: "GPT 5.1 Codex Mini",
+    name: "Codex 5.1 Mini",
     thinkings: ["medium", "high"] as CodexThinkingLevel[],
   },
 ]

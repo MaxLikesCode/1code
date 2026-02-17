@@ -359,20 +359,7 @@ function preprocessCodexModelName(params: {
     return params.modelId
   }
 
-  if (params.modelId === "gpt-5.3-codex") {
-    return "gpt-5.2-codex/high"
-  }
-
-  const gpt53Prefix = "gpt-5.3-codex/"
-  if (params.modelId.startsWith(gpt53Prefix)) {
-    const requestedThinking = params.modelId.slice(gpt53Prefix.length)
-    const supportedThinkingLevels = new Set(["low", "medium", "high", "xhigh"])
-    const normalizedThinking = supportedThinkingLevels.has(requestedThinking)
-      ? requestedThinking
-      : "high"
-    return `gpt-5.2-codex/${normalizedThinking}`
-  }
-
+  // All model IDs now match the real API; pass through as-is
   return params.modelId
 }
 
