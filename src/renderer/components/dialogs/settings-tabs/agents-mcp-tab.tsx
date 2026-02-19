@@ -1,7 +1,7 @@
 "use client"
 
 import { useAtomValue } from "jotai"
-import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { ChevronRight, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
@@ -468,6 +468,18 @@ export function AgentsMcpTab() {
     scope: ScopeType
     projectPath?: string | null
   } | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const toggleGroup = useCallback((groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) {
+        next.delete(groupKey)
+      } else {
+        next.add(groupKey)
+      }
+      return next
+    })
+  }, [])
   const searchInputRef = useRef<HTMLInputElement>(null)
   const selectedProject = useAtomValue(selectedProjectAtom)
   const providerSections = useMemo<ProviderSection[]>(
@@ -570,12 +582,26 @@ export function AgentsMcpTab() {
   const filteredSections = useMemo(
     () =>
       providerSections
-        .map((section) => ({
-          ...section,
-          servers: filteredListedServers.filter(
+        .map((section) => {
+          const servers = filteredListedServers.filter(
             (server) => server.provider === section.provider,
-          ),
-        }))
+          )
+          // Group servers by groupName preserving original order
+          const groupOrder: string[] = []
+          const groupMap = new Map<string, ListedServer[]>()
+          for (const s of servers) {
+            if (!groupMap.has(s.groupName)) {
+              groupOrder.push(s.groupName)
+              groupMap.set(s.groupName, [])
+            }
+            groupMap.get(s.groupName)!.push(s)
+          }
+          const groups = groupOrder.map((name) => ({
+            groupName: name,
+            servers: groupMap.get(name)!,
+          }))
+          return { ...section, servers, groups }
+        })
         .filter((section) => section.servers.length > 0),
     [providerSections, filteredListedServers],
   )
@@ -845,58 +871,83 @@ export function AgentsMcpTab() {
                       </p>
                       <div className="mt-1 h-px bg-border" />
                     </div>
-                    {section.servers.map((item) => {
-                      const key = item.key
-                      const server = item.server
-                      const isDisabled = isServerDisabled(server)
-                      const hideToolsCount = isCodexHttpServer(item.provider, server)
-                      const isSelected = selectedServerKey === key
+                    {section.groups.map((group) => {
+                      const groupKey = `${section.provider}:${group.groupName}`
+                      const isCollapsed = collapsedGroups.has(groupKey)
+                      const hasMultipleGroups = section.groups.length > 1
                       return (
-                        <button
-                          key={key}
-                          data-item-id={key}
-                          onClick={() => setSelectedServerKey(key)}
-                          className={cn(
-                            "w-full text-left py-1.5 pl-2 pr-2 rounded-md cursor-pointer group relative",
-                            "transition-colors duration-75",
-                            "outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70",
-                            isSelected
-                              ? "bg-foreground/5 text-foreground"
-                              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+                        <div key={groupKey}>
+                          {hasMultipleGroups && (
+                            <button
+                              onClick={() => toggleGroup(groupKey)}
+                              className="w-full flex items-center gap-1 px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors cursor-pointer"
+                            >
+                              <ChevronRight
+                                className={cn(
+                                  "h-3 w-3 shrink-0 transition-transform duration-150",
+                                  !isCollapsed && "rotate-90",
+                                )}
+                              />
+                              <span className="truncate font-medium">{group.groupName}</span>
+                              <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/50">
+                                {group.servers.length}
+                              </span>
+                            </button>
                           )}
-                        >
-                          <div className="flex items-start gap-2">
-                            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                              <div className="flex items-center gap-1">
-                                <span
+                          {(!hasMultipleGroups || !isCollapsed) &&
+                            group.servers.map((item) => {
+                              const key = item.key
+                              const server = item.server
+                              const isDisabled = isServerDisabled(server)
+                              const hideToolsCount = isCodexHttpServer(item.provider, server)
+                              const isSelected = selectedServerKey === key
+                              return (
+                                <button
+                                  key={key}
+                                  data-item-id={key}
+                                  onClick={() => setSelectedServerKey(key)}
                                   className={cn(
-                                    "truncate block text-sm leading-tight flex-1",
-                                    isDisabled && "opacity-50",
+                                    "w-full text-left py-1.5 pr-2 rounded-md cursor-pointer group relative",
+                                    "transition-colors duration-75",
+                                    "outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70",
+                                    hasMultipleGroups ? "pl-5" : "pl-2",
+                                    isSelected
+                                      ? "bg-foreground/5 text-foreground"
+                                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
                                   )}
                                 >
-                                  {server.name}
-                                </span>
-                                <div className="flex-shrink-0 w-3.5 h-3.5 flex items-center justify-center">
-                                  <McpStatusDot status={server.status} disabled={isDisabled} />
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60 min-w-0">
-                                <span className="truncate flex-1 min-w-0">
-                                  {item.groupName}
-                                </span>
-                                {server.status !== "pending" && (
-                                  <span className="flex-shrink-0">
-                                    {isDisabled
-                                      ? "Disabled"
-                                      : server.status === "connected"
-                                        ? (hideToolsCount ? "Connected" : `${server.tools.length} tool${server.tools.length !== 1 ? "s" : ""}`)
-                                        : getStatusText(server.status)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </button>
+                                  <div className="flex items-start gap-2">
+                                    <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                                      <div className="flex items-center gap-1">
+                                        <span
+                                          className={cn(
+                                            "truncate block text-sm leading-tight flex-1",
+                                            isDisabled && "opacity-50",
+                                          )}
+                                        >
+                                          {server.name}
+                                        </span>
+                                        <div className="flex-shrink-0 w-3.5 h-3.5 flex items-center justify-center">
+                                          <McpStatusDot status={server.status} disabled={isDisabled} />
+                                        </div>
+                                      </div>
+                                      {server.status !== "pending" && (
+                                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60 min-w-0">
+                                          <span className="flex-shrink-0">
+                                            {isDisabled
+                                              ? "Disabled"
+                                              : server.status === "connected"
+                                                ? (hideToolsCount ? "Connected" : `${server.tools.length} tool${server.tools.length !== 1 ? "s" : ""}`)
+                                                : getStatusText(server.status)}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </button>
+                              )
+                            })}
+                        </div>
                       )
                     })}
                   </div>
