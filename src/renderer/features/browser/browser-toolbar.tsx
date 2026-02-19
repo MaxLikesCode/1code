@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react"
-import { ArrowLeft, ArrowRight, RotateCw, X, Globe, Code2 } from "lucide-react"
+import { ArrowLeft, ArrowRight, RotateCw, X, Globe, Code2, Puzzle } from "lucide-react"
 import { Button } from "../../components/ui/button"
 import { ProfileBadge } from "./profile-badge"
 import type { BrowserTabState } from "./atoms"
@@ -17,6 +17,7 @@ interface BrowserToolbarProps {
   onClose: () => void
   onChangeProfile: (profileId: string) => void
   onManageProfiles: () => void
+  onManageExtensions: () => void
 }
 
 export function BrowserToolbar({
@@ -30,6 +31,7 @@ export function BrowserToolbar({
   onClose,
   onChangeProfile,
   onManageProfiles,
+  onManageExtensions,
 }: BrowserToolbarProps) {
   const [urlInput, setUrlInput] = useState(activeTab?.url ?? "")
   const [isFocused, setIsFocused] = useState(false)
@@ -183,6 +185,17 @@ export function BrowserToolbar({
           </div>
         )}
       </div>
+
+      {/* Extensions */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        onClick={onManageExtensions}
+        title="Extensions"
+      >
+        <Puzzle className="h-3.5 w-3.5" />
+      </Button>
 
       {/* DevTools */}
       <Button

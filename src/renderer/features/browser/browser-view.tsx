@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef } from "react"
 import { useAtom, useSetAtom } from "jotai"
 import { Globe } from "lucide-react"
-import { browserActiveTabIdAtom, browserTabsAtom, profileManagerOpenAtom, type BrowserTabState } from "./atoms"
+import { browserActiveTabIdAtom, browserTabsAtom, profileManagerOpenAtom, extensionManagerOpenAtom, type BrowserTabState } from "./atoms"
 import { BrowserTabBar } from "./browser-tab-bar"
 import { BrowserToolbar } from "./browser-toolbar"
 import { BrowserWebview, getWebviewForTab } from "./browser-webview"
 import { ProfileManager } from "./profile-manager"
+import { ExtensionManager } from "./extension-manager"
 import { Button } from "../../components/ui/button"
 import { ProfileBadge } from "./profile-badge"
 import { trpc } from "../../lib/trpc"
@@ -20,12 +21,14 @@ export function BrowserView() {
   const [activeTabId, setActiveTabId] = useAtom(browserActiveTabIdAtom)
   const setDesktopView = useSetAtom(desktopViewAtom)
   const setProfileManagerOpen = useSetAtom(profileManagerOpenAtom)
+  const setExtensionManagerOpen = useSetAtom(extensionManagerOpenAtom)
   const initializedRef = useRef(false)
 
   const { data: profiles = [] } = trpc.browser.listProfiles.useQuery()
   const { data: savedTabs = [] } = trpc.browser.listTabs.useQuery()
   const saveTab = trpc.browser.saveTab.useMutation()
   const deleteTabMutation = trpc.browser.deleteTab.useMutation()
+  const ensureExtensions = trpc.browser.ensureExtensions.useMutation()
 
   const activeTab = tabs.find(t => t.id === activeTabId) ?? null
 
@@ -33,6 +36,10 @@ export function BrowserView() {
   useEffect(() => {
     if (initializedRef.current || !savedTabs.length || !profiles.length) return
     initializedRef.current = true
+
+    // Ensure extensions are loaded for all profiles that have tabs
+    const profileIds = [...new Set(savedTabs.map(t => t.profileId))]
+    profileIds.forEach(pid => ensureExtensions.mutate({ profileId: pid }))
 
     const restored: BrowserTabState[] = savedTabs.map((st) => ({
       id: st.id,
@@ -45,7 +52,7 @@ export function BrowserView() {
     }))
     setTabs(restored)
     setActiveTabId(restored[0]?.id ?? null)
-  }, [savedTabs, profiles, setTabs, setActiveTabId])
+  }, [savedTabs, profiles, setTabs, setActiveTabId, ensureExtensions])
 
   // Save tab state to DB (debounced via effect)
   const saveTabToDb = useCallback((tab: BrowserTabState) => {
@@ -58,13 +65,15 @@ export function BrowserView() {
     })
   }, [saveTab, tabs])
 
-  const handleNewTab = useCallback((profileId?: string) => {
+  const handleNewTab = useCallback(async (profileId?: string) => {
     const pid = profileId ?? profiles[0]?.id
     if (!pid) {
       // No profiles - open profile manager
       setProfileManagerOpen(true)
       return
     }
+    // Ensure extensions are loaded into this profile's session before creating webview
+    await ensureExtensions.mutateAsync({ profileId: pid })
     const id = createTabId()
     const newTab: BrowserTabState = {
       id,
@@ -84,7 +93,7 @@ export function BrowserView() {
       title: "New Tab",
       sortOrder: tabs.length,
     })
-  }, [profiles, setTabs, setActiveTabId, saveTab, tabs.length, setProfileManagerOpen])
+  }, [profiles, setTabs, setActiveTabId, saveTab, tabs.length, setProfileManagerOpen, ensureExtensions])
 
   const handleCloseTab = useCallback((tabId: string) => {
     setTabs(prev => {
@@ -281,6 +290,7 @@ export function BrowserView() {
         onClose={handleClose}
         onChangeProfile={handleChangeProfile}
         onManageProfiles={() => setProfileManagerOpen(true)}
+        onManageExtensions={() => setExtensionManagerOpen(true)}
       />
 
       {/* Webview area */}
@@ -304,8 +314,9 @@ export function BrowserView() {
         ))}
       </div>
 
-      {/* Profile manager dialog */}
+      {/* Dialogs */}
       <ProfileManager />
+      <ExtensionManager />
     </div>
   )
 }
