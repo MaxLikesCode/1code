@@ -24,7 +24,7 @@ export interface FileMentionOption {
   truncatedPath?: string // directory path for inline display or skill description
   additions?: number // for changed files
   deletions?: number // for changed files
-  type?: "file" | "folder" | "skill" | "agent" | "category" | "tool" // entry type (default: file)
+  type?: "file" | "folder" | "skill" | "agent" | "category" | "tool" | "command" // entry type (default: file)
   // Extended data for rich tooltips (skills/agents/tools)
   description?: string // skill/agent/tool description
   tools?: string[] // agent allowed tools
@@ -40,6 +40,7 @@ export const MENTION_PREFIXES = {
   SKILL: "skill:",
   AGENT: "agent:",
   TOOL: "tool:", // MCP tools
+  COMMAND: "command:", // Slash commands from plugins/custom
   QUOTE: "quote:", // Selected text from assistant messages
   DIFF: "diff:", // Selected text from diff sidebar
   PASTED: "pasted:", // Large pasted text saved as files
@@ -231,6 +232,11 @@ function buildContentFromSerialized(
       // Parse agent mention: agent:agent-name
       const agentName = id.slice(MENTION_PREFIXES.AGENT.length)
       option = { id, label: agentName, path: "", repository: "", type: "agent" }
+    }
+    if (!option && id.startsWith(MENTION_PREFIXES.COMMAND)) {
+      // Parse command mention: command:command-name
+      const commandName = id.slice(MENTION_PREFIXES.COMMAND.length)
+      option = { id, label: `/${commandName}`, path: "", repository: "", type: "command" }
     }
     if (!option && id.startsWith(MENTION_PREFIXES.TOOL)) {
       const toolPath = id.slice(MENTION_PREFIXES.TOOL.length)
@@ -702,6 +708,10 @@ export const AgentsMentionsEditor = memo(
           if (id.startsWith(MENTION_PREFIXES.AGENT)) {
             const agentName = id.slice(MENTION_PREFIXES.AGENT.length)
             return { id, label: agentName, path: "", repository: "", type: "agent" }
+          }
+          if (id.startsWith(MENTION_PREFIXES.COMMAND)) {
+            const commandName = id.slice(MENTION_PREFIXES.COMMAND.length)
+            return { id, label: `/${commandName}`, path: "", repository: "", type: "command" }
           }
           if (id.startsWith(MENTION_PREFIXES.TOOL)) {
             const toolPath = id.slice(MENTION_PREFIXES.TOOL.length)

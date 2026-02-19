@@ -1112,8 +1112,9 @@ export function NewChatForm({
       return
     }
 
-    // Check if message is a slash command with arguments (e.g. "/hello world")
-    // Note: 's' flag makes '.' match newlines, so multi-line arguments are captured
+    // Command mention chips (@[command:name]) are kept as-is in the user message.
+    // The backend (claude.ts parseMentions) handles expansion, like skills.
+    // Legacy plain-text slash commands still expand on frontend.
     const slashMatch = message.match(/^\/(\S+)\s*(.*)$/s)
     if (slashMatch) {
       const [, commandName, args] = slashMatch
@@ -1134,8 +1135,12 @@ export function NewChatForm({
             const { content } = await trpcUtils.commands.getContent.fetch({
               path: cmd.path,
             })
-            // Replace $ARGUMENTS with the provided args
-            message = content.replace(/\$ARGUMENTS/g, args.trim())
+            // Replace $ARGUMENTS with the provided args, or append if no placeholder
+            if (content.includes("$ARGUMENTS")) {
+              message = content.replace(/\$ARGUMENTS/g, args.trim())
+            } else {
+              message = args.trim() ? `${content}\n\n${args.trim()}` : content
+            }
           }
         } catch (error) {
           console.error("Failed to process custom command:", error)
@@ -1385,7 +1390,19 @@ export function NewChatForm({
         }
       }
 
-      // For all other commands (builtin prompts and custom):
+      // For custom commands with prompt content: insert as chip (expanded on backend)
+      if (command.prompt) {
+        editorRef.current?.insertMention({
+          id: `${MENTION_PREFIXES.COMMAND}${command.name}`,
+          label: `/${command.name}`,
+          path: command.path || "",
+          repository: "",
+          type: "command",
+        })
+        return
+      }
+
+      // Fallback for commands without prompt content:
       // insert the command and let user add arguments or press Enter to send
       editorRef.current?.setValue(`/${command.name} `)
     },

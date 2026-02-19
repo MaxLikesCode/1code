@@ -40,13 +40,14 @@ import {
   type McpToolInfo,
 } from "../../mcp-auth"
 import { fetchOAuthMetadata, getMcpBaseUrl } from "../../oauth"
-import { discoverPluginMcpServers } from "../../plugins"
+import { discoverInstalledPlugins, discoverPluginMcpServers, getPluginComponentPaths } from "../../plugins"
 import { publicProcedure, router } from "../index"
 import { buildAgentsOption } from "./agent-utils"
 import {
   getApprovedPluginMcpServers,
   getEnabledPlugins,
 } from "./claude-settings"
+import { scanCommandsDirectory, type FileCommand } from "./commands"
 
 /**
  * Parse @[agent:name], @[skill:name], and @[tool:servername] mentions from prompt text
@@ -62,18 +63,20 @@ function parseMentions(prompt: string): {
   cleanedPrompt: string
   agentMentions: string[]
   skillMentions: string[]
+  commandMentions: string[]
   fileMentions: string[]
   folderMentions: string[]
   toolMentions: string[]
 } {
   const agentMentions: string[] = []
   const skillMentions: string[] = []
+  const commandMentions: string[] = []
   const fileMentions: string[] = []
   const folderMentions: string[] = []
   const toolMentions: string[] = []
 
   // Match @[prefix:name] pattern
-  const mentionRegex = /@\[(file|folder|skill|agent|tool):([^\]]+)\]/g
+  const mentionRegex = /@\[(file|folder|skill|agent|tool|command):([^\]]+)\]/g
   let match
 
   while ((match = mentionRegex.exec(prompt)) !== null) {
@@ -84,6 +87,9 @@ function parseMentions(prompt: string): {
         break
       case "skill":
         skillMentions.push(name)
+        break
+      case "command":
+        commandMentions.push(name)
         break
       case "file":
         fileMentions.push(name)
@@ -103,12 +109,13 @@ function parseMentions(prompt: string): {
     }
   }
 
-  // Clean agent/skill/tool mentions from prompt (they will be added as context or hints)
+  // Clean agent/skill/tool/command mentions from prompt (they will be added as context or hints)
   // Keep file/folder mentions as they are useful context
   let cleanedPrompt = prompt
     .replace(/@\[agent:[^\]]+\]/g, "")
     .replace(/@\[skill:[^\]]+\]/g, "")
     .replace(/@\[tool:[^\]]+\]/g, "")
+    .replace(/@\[command:[^\]]+\]/g, "")
     .trim()
 
   // Transform file mentions to readable paths for the agent
@@ -140,9 +147,64 @@ function parseMentions(prompt: string): {
     cleanedPrompt,
     agentMentions,
     skillMentions,
+    commandMentions,
     fileMentions,
     folderMentions,
     toolMentions,
+  }
+}
+
+/**
+ * Expand @[command:name] mentions by looking up command content from filesystem.
+ * Scans user (~/.claude/commands/), project (.claude/commands/), and plugin commands.
+ */
+async function expandCommandMentions(
+  commandNames: string[],
+  projectPath?: string,
+): Promise<Map<string, string>> {
+  if (commandNames.length === 0) return new Map()
+
+  try {
+    // Scan all command directories (same logic as commands.list router)
+    const userCommandsDir = path.join(os.homedir(), ".claude", "commands")
+    const promises: Promise<FileCommand[]>[] = [
+      scanCommandsDirectory(userCommandsDir, "user"),
+    ]
+
+    if (projectPath) {
+      const projectCommandsDir = path.join(projectPath, ".claude", "commands")
+      promises.push(scanCommandsDirectory(projectCommandsDir, "project", "", projectPath))
+    }
+
+    // Plugin commands
+    const [enabledPluginSources, installedPlugins] = await Promise.all([
+      getEnabledPlugins(),
+      discoverInstalledPlugins(),
+    ])
+    const enabledPlugins = installedPlugins.filter(
+      (p) => enabledPluginSources.includes(p.source),
+    )
+    for (const plugin of enabledPlugins) {
+      const paths = getPluginComponentPaths(plugin)
+      promises.push(scanCommandsDirectory(paths.commands, "plugin", plugin.name))
+    }
+
+    const allCommands = (await Promise.all(promises)).flat()
+
+    // Build map of name -> content for requested commands
+    const result = new Map<string, string>()
+    for (const name of commandNames) {
+      const cmd = allCommands.find(
+        (c) => c.name.toLowerCase() === name.toLowerCase(),
+      )
+      if (cmd) {
+        result.set(name, cmd.content)
+      }
+    }
+    return result
+  } catch (error) {
+    console.error("[claude] Failed to expand command mentions:", error)
+    return new Map()
   }
 }
 
@@ -275,6 +337,32 @@ function mcpCacheKey(scope: string | null, serverName: string): string {
 
 // Cache for symlinks (track which subChatIds have already set up symlinks)
 const symlinksCreated = new Set<string>()
+
+/**
+ * Create a symlink if source exists and target doesn't.
+ * Silently ignores errors (e.g., already exists, permission issues).
+ */
+async function ensureSymlink(
+  source: string,
+  target: string,
+  type: "file" | "dir",
+): Promise<void> {
+  try {
+    const sourceExists = await fs
+      .stat(source)
+      .then(() => true)
+      .catch(() => false)
+    const targetExists = await fs
+      .lstat(target)
+      .then(() => true)
+      .catch(() => false)
+    if (sourceExists && !targetExists) {
+      await fs.symlink(source, target, type)
+    }
+  } catch {
+    // Ignore symlink errors (might already exist or permission issues)
+  }
+}
 
 // Cache for MCP config (avoid re-reading ~/.claude.json on every message)
 const mcpConfigCache = new Map<
@@ -1032,9 +1120,33 @@ export const claudeRouter = router({
             // Capture stderr from Claude process for debugging
             const stderrLines: string[] = []
 
-            // Parse mentions from prompt (agents, skills, files, folders)
-            const { cleanedPrompt, agentMentions, skillMentions } =
+            // Parse mentions from prompt (agents, skills, commands, files, folders)
+            const { cleanedPrompt, agentMentions, skillMentions, commandMentions } =
               parseMentions(input.prompt)
+
+            // Expand command mentions (slash commands from plugins/custom)
+            let expandedPrompt = cleanedPrompt
+            if (commandMentions.length > 0) {
+              console.log(`[claude] Command mentions:`, commandMentions)
+              const commandContents = await expandCommandMentions(
+                commandMentions,
+                input.cwd,
+              )
+              // Prepend command contents to the prompt
+              const commandParts: string[] = []
+              for (const name of commandMentions) {
+                const content = commandContents.get(name)
+                if (content) {
+                  commandParts.push(content)
+                }
+              }
+              if (commandParts.length > 0) {
+                const commandPrefix = commandParts.join("\n\n")
+                expandedPrompt = expandedPrompt.trim()
+                  ? `${commandPrefix}\n\n${expandedPrompt}`
+                  : commandPrefix
+              }
+            }
 
             // Build agents option for SDK (proper registration via options.agents)
             const agentsOption = await buildAgentsOption(
@@ -1056,7 +1168,7 @@ export const claudeRouter = router({
             }
 
             // Build final prompt with skill instructions if needed
-            let finalPrompt = cleanedPrompt
+            let finalPrompt = expandedPrompt
 
             // Handle empty prompt when only mentions are present
             if (!finalPrompt.trim()) {
@@ -1141,8 +1253,8 @@ export const claudeRouter = router({
             // MCP servers to pass to SDK (read from ~/.claude.json)
             let mcpServersForSdk: Record<string, any> | undefined
 
-            // Ensure isolated config dir exists and symlink skills/agents from ~/.claude/
-            // This is needed because SDK looks for skills at $CLAUDE_CONFIG_DIR/skills/
+            // Ensure isolated config dir exists and symlink ~/.claude/ contents
+            // The SDK looks for skills, agents, plugins, settings, commands at $CLAUDE_CONFIG_DIR/
             // OPTIMIZATION: Only create symlinks once per subChatId (cached)
             try {
               await fs.mkdir(isolatedConfigDir, { recursive: true })
@@ -1151,44 +1263,15 @@ export const claudeRouter = router({
               const cacheKey = isUsingOllama ? input.chatId : input.subChatId
               if (!symlinksCreated.has(cacheKey)) {
                 const homeClaudeDir = path.join(os.homedir(), ".claude")
-                const skillsSource = path.join(homeClaudeDir, "skills")
-                const skillsTarget = path.join(isolatedConfigDir, "skills")
-                const agentsSource = path.join(homeClaudeDir, "agents")
-                const agentsTarget = path.join(isolatedConfigDir, "agents")
 
-                // Symlink skills directory if source exists and target doesn't
-                try {
-                  const skillsSourceExists = await fs
-                    .stat(skillsSource)
-                    .then(() => true)
-                    .catch(() => false)
-                  const skillsTargetExists = await fs
-                    .lstat(skillsTarget)
-                    .then(() => true)
-                    .catch(() => false)
-                  if (skillsSourceExists && !skillsTargetExists) {
-                    await fs.symlink(skillsSource, skillsTarget, "dir")
-                  }
-                } catch (symlinkErr) {
-                  // Ignore symlink errors (might already exist or permission issues)
-                }
+                // Symlink directories from ~/.claude/ into the isolated config dir
+                await ensureSymlink(path.join(homeClaudeDir, "skills"), path.join(isolatedConfigDir, "skills"), "dir")
+                await ensureSymlink(path.join(homeClaudeDir, "agents"), path.join(isolatedConfigDir, "agents"), "dir")
+                await ensureSymlink(path.join(homeClaudeDir, "plugins"), path.join(isolatedConfigDir, "plugins"), "dir")
+                await ensureSymlink(path.join(homeClaudeDir, "commands"), path.join(isolatedConfigDir, "commands"), "dir")
 
-                // Symlink agents directory if source exists and target doesn't
-                try {
-                  const agentsSourceExists = await fs
-                    .stat(agentsSource)
-                    .then(() => true)
-                    .catch(() => false)
-                  const agentsTargetExists = await fs
-                    .lstat(agentsTarget)
-                    .then(() => true)
-                    .catch(() => false)
-                  if (agentsSourceExists && !agentsTargetExists) {
-                    await fs.symlink(agentsSource, agentsTarget, "dir")
-                  }
-                } catch (symlinkErr) {
-                  // Ignore symlink errors (might already exist or permission issues)
-                }
+                // Symlink settings.json (file, not directory) so SDK sees user's plugin enablement, permissions, hooks
+                await ensureSymlink(path.join(homeClaudeDir, "settings.json"), path.join(isolatedConfigDir, "settings.json"), "file")
 
                 symlinksCreated.add(cacheKey)
               }

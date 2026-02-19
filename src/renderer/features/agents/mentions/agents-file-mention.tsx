@@ -25,6 +25,7 @@ import {
   IconSpinner,
   SkillIcon,
   CustomAgentIcon,
+  CustomTerminalIcon,
   OriginalMCPIcon,
 } from "../../../components/ui/icons"
 import { ChevronRight } from "lucide-react"
@@ -372,7 +373,7 @@ function createMCPIconElement(): SVGSVGElement {
 }
 
 // Create SVG icon element in DOM based on file extension or type
-export function createFileIconElement(filename: string, type?: "file" | "folder" | "skill" | "agent" | "category" | "tool"): SVGSVGElement {
+export function createFileIconElement(filename: string, type?: "file" | "folder" | "skill" | "agent" | "category" | "tool" | "command"): SVGSVGElement {
   // Tool type: create MCP icon directly via DOM API (flushSync is unreliable for this icon)
   if (type === "tool") {
     return createMCPIconElement()
@@ -382,6 +383,8 @@ export function createFileIconElement(filename: string, type?: "file" | "folder"
     ? SkillIcon
     : type === "agent"
       ? CustomAgentIcon
+    : type === "command"
+      ? CustomTerminalIcon
     : type === "folder"
       ? FolderOpenIcon
       : (getFileIconByExtension(filename) ?? UnknownFileIcon)
@@ -720,6 +723,13 @@ export const AgentsFileMention = memo(function AgentsFileMention({
   // Get session info (MCP servers, tools) from atom
   const sessionInfo = useAtomValue(sessionInfoAtom)
 
+  // Fallback MCP config when no session data is available
+  // This allows MCP servers to show in @ dropdown even before first chat session
+  const { data: allMcpConfig } = trpc.claude.getAllMcpConfig.useQuery(undefined, {
+    staleTime: 60_000,
+    enabled: isOpen && !sessionInfo?.mcpServers?.length,
+  })
+
   // Fetch skills from filesystem (cached for 5 minutes)
   const { data: skills = [], isFetching: isFetchingSkills } = trpc.skills.listEnabled.useQuery(
     projectPath ? { cwd: projectPath } : undefined,
@@ -895,22 +905,39 @@ export const AgentsFileMention = memo(function AgentsFileMention({
   }, [customAgents, debouncedSearchText])
 
   // Convert MCP servers to mention options (show servers, not individual tools)
+  // Prefers sessionInfo (from active SDK session), falls back to getAllMcpConfig
   const allToolOptions: FileMentionOption[] = useMemo(() => {
-    if (!sessionInfo?.mcpServers) return []
-
-    const connectedServers = sessionInfo.mcpServers
-      .filter(s => s.status === "connected")
-
-    return connectedServers.map(server => ({
-      id: `${MENTION_PREFIXES.TOOL}${server.name}`,
-      label: server.name,
-      path: server.name,
+    const toOption = (name: string): FileMentionOption => ({
+      id: `${MENTION_PREFIXES.TOOL}${name}`,
+      label: name,
+      path: name,
       repository: "",
       truncatedPath: "",
       type: "tool" as const,
-      mcpServer: server.name,
-    }))
-  }, [sessionInfo])
+      mcpServer: name,
+    })
+
+    // Prefer session data (reflects actual connected servers during chat)
+    if (sessionInfo?.mcpServers?.length) {
+      return sessionInfo.mcpServers
+        .filter(s => s.status === "connected")
+        .map(s => toOption(s.name))
+    }
+
+    // Fallback: use getAllMcpConfig (shows configured servers even before session starts)
+    if (allMcpConfig?.groups) {
+      const connectedServers = allMcpConfig.groups
+        .flatMap(g => g.mcpServers)
+        .filter(s => s.status === "connected")
+      // Deduplicate by server name
+      const seen = new Set<string>()
+      return connectedServers
+        .filter(s => { if (seen.has(s.name)) return false; seen.add(s.name); return true })
+        .map(s => toOption(s.name))
+    }
+
+    return []
+  }, [sessionInfo, allMcpConfig])
 
   // Filtered tool options based on search (searches by server name)
   const toolOptions: FileMentionOption[] = useMemo(() => {

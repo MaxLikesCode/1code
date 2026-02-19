@@ -3805,8 +3805,9 @@ const ChatViewInner = memo(function ChatViewInner({
 
     const text = inputValue.trim()
 
-    // Expand custom slash commands with arguments (e.g. "/Apex my argument")
-    // This mirrors the logic in new-chat-form.tsx
+    // Command mention chips (@[command:name]) are kept as-is in the user message.
+    // The backend (claude.ts parseMentions) handles expansion, like skills.
+    // Legacy plain-text slash commands (/name args) still expand on frontend.
     let finalText = text
     const slashMatch = text.match(/^\/(\S+)\s*(.*)$/s)
     if (slashMatch) {
@@ -3826,7 +3827,11 @@ const ChatViewInner = memo(function ChatViewInner({
             const { content } = await trpcClient.commands.getContent.query({
               path: cmd.path,
             })
-            finalText = content.replace(/\$ARGUMENTS/g, args.trim())
+            if (content.includes("$ARGUMENTS")) {
+              finalText = content.replace(/\$ARGUMENTS/g, args.trim())
+            } else {
+              finalText = args.trim() ? `${content}\n\n${args.trim()}` : content
+            }
           }
         } catch (error) {
           console.error("Failed to expand custom slash command:", error)
@@ -4127,11 +4132,12 @@ const ChatViewInner = memo(function ChatViewInner({
 
     const text = inputValue.trim()
 
-    // Expand custom slash commands with arguments (e.g. "/Apex my argument")
+    // Command mention chips (@[command:name]) are expanded on the backend.
+    // Legacy plain-text slash commands still expand here.
     let finalText = text
-    const slashMatch = text.match(/^\/(\S+)\s*(.*)$/s)
-    if (slashMatch) {
-      const [, commandName, args] = slashMatch
+    const slashMatch2 = finalText.match(/^\/(\S+)\s*(.*)$/s)
+    if (slashMatch2) {
+      const [, commandName, args] = slashMatch2
       const builtinNames = new Set(
         BUILTIN_SLASH_COMMANDS.map((cmd) => cmd.name),
       )
@@ -4147,7 +4153,11 @@ const ChatViewInner = memo(function ChatViewInner({
             const { content } = await trpcClient.commands.getContent.query({
               path: cmd.path,
             })
-            finalText = content.replace(/\$ARGUMENTS/g, args.trim())
+            if (content.includes("$ARGUMENTS")) {
+              finalText = content.replace(/\$ARGUMENTS/g, args.trim())
+            } else {
+              finalText = args.trim() ? `${content}\n\n${args.trim()}` : content
+            }
           }
         } catch (error) {
           console.error("Failed to expand custom slash command:", error)

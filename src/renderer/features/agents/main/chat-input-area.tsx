@@ -81,6 +81,7 @@ import type { DiffTextContext, SelectedTextContext } from "../lib/queue-utils"
 import {
   AgentsFileMention,
   AgentsMentionsEditor,
+  MENTION_PREFIXES,
   type AgentsMentionsEditorHandle,
   type FileMentionOption,
 } from "../mentions"
@@ -1027,7 +1028,19 @@ export const ChatInputArea = memo(function ChatInputArea({
         }
       }
 
-      // For all other commands (builtin prompts and custom):
+      // For custom commands with prompt content: insert as chip (expanded on backend)
+      if (command.prompt) {
+        editorRef.current?.insertMention({
+          id: `${MENTION_PREFIXES.COMMAND}${command.name}`,
+          label: `/${command.name}`,
+          path: command.path || "",
+          repository: "",
+          type: "command",
+        })
+        return
+      }
+
+      // Fallback for commands without prompt content:
       // insert the command and let user add arguments or press Enter to send
       editorRef.current?.setValue(`/${command.name} `)
     },

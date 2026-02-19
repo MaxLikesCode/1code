@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo } from "react"
 import { getFileIconByExtension } from "./agents-file-mention"
-import { SkillIcon, CustomAgentIcon, OriginalMCPIcon } from "../../../components/ui/icons"
+import { SkillIcon, CustomAgentIcon, OriginalMCPIcon, CustomTerminalIcon } from "../../../components/ui/icons"
 import { UnknownFileIcon } from "../../../icons/framework-icons"
 import { MENTION_PREFIXES } from "./agents-mentions-editor"
 import {
@@ -100,7 +100,7 @@ interface ParsedMention {
   label: string
   path: string
   repository: string
-  type: "file" | "folder" | "skill" | "agent" | "tool" | "quote" | "diff" | "pasted" | "chatHistory"
+  type: "file" | "folder" | "skill" | "agent" | "tool" | "command" | "quote" | "diff" | "pasted" | "chatHistory"
   // Extra data for quote/diff/pasted mentions
   fullText?: string
   lineNumber?: number
@@ -121,12 +121,13 @@ function parseMention(id: string): ParsedMention | null {
   const isSkill = id.startsWith(MENTION_PREFIXES.SKILL)
   const isAgent = id.startsWith(MENTION_PREFIXES.AGENT)
   const isTool = id.startsWith(MENTION_PREFIXES.TOOL)
+  const isCommand = id.startsWith(MENTION_PREFIXES.COMMAND)
   const isQuote = id.startsWith(MENTION_PREFIXES.QUOTE)
   const isDiff = id.startsWith(MENTION_PREFIXES.DIFF)
   const isPasted = id.startsWith(MENTION_PREFIXES.PASTED)
   const isChatHistory = id.startsWith(MENTION_PREFIXES.CHAT_HISTORY)
 
-  if (!isFile && !isFolder && !isSkill && !isAgent && !isTool && !isQuote && !isDiff && !isPasted && !isChatHistory) return null
+  if (!isFile && !isFolder && !isSkill && !isAgent && !isTool && !isCommand && !isQuote && !isDiff && !isPasted && !isChatHistory) return null
 
   // Handle quote mentions (format: quote:preview_text:base64_full_text)
   if (isQuote) {
@@ -270,6 +271,18 @@ function parseMention(id: string): ParsedMention | null {
     }
   }
 
+  // Handle command mentions (format: command:name)
+  if (isCommand) {
+    const commandName = id.slice(MENTION_PREFIXES.COMMAND.length)
+    return {
+      id,
+      label: `/${commandName}`,
+      path: "",
+      repository: "",
+      type: "command",
+    }
+  }
+
   // Handle tool mentions: tool:servername (MCP server) or tool:mcp__server__toolname (individual tool)
   if (isTool) {
     const toolPath = id.slice(MENTION_PREFIXES.TOOL.length)
@@ -372,19 +385,23 @@ function MentionChip({ mention }: { mention: ParsedMention }) {
     ? SkillIcon
     : mention.type === "agent"
       ? CustomAgentIcon
-      : mention.type === "tool"
-        ? OriginalMCPIcon
-        : mention.type === "folder"
-          ? FolderOpenIcon
-          : (getFileIconByExtension(mention.label) ?? UnknownFileIcon)
+      : mention.type === "command"
+        ? CustomTerminalIcon
+        : mention.type === "tool"
+          ? OriginalMCPIcon
+          : mention.type === "folder"
+            ? FolderOpenIcon
+            : (getFileIconByExtension(mention.label) ?? UnknownFileIcon)
 
   const title = mention.type === "skill"
     ? `Skill: ${mention.label}`
     : mention.type === "agent"
       ? `Agent: ${mention.label}`
-      : mention.type === "tool"
-        ? `MCP Tool: ${mention.path}`
-        : `${mention.repository}:${mention.path}`
+      : mention.type === "command"
+        ? `Command: ${mention.label}`
+        : mention.type === "tool"
+          ? `MCP Tool: ${mention.path}`
+          : `${mention.repository}:${mention.path}`
 
   return (
     <span
@@ -502,7 +519,7 @@ export function extractFileMentions(text: string): ParsedMention[] {
  * Check if text contains any file, folder, skill, agent, tool, quote, diff, or pasted mentions
  */
 export function hasFileMentions(text: string): boolean {
-  return /@\[(file|folder|skill|agent|tool|quote|diff|pasted|chatHistory):[^\]]+\]/.test(text)
+  return /@\[(file|folder|skill|agent|tool|command|quote|diff|pasted|chatHistory):[^\]]+\]/.test(text)
 }
 
 /**

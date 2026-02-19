@@ -54,7 +54,7 @@ function isValidEntryName(name: string): boolean {
  * Recursively scan a directory for .md command files
  * Supports namespaces via nested folders: git/commit.md → git:commit
  */
-async function scanCommandsDirectory(
+export async function scanCommandsDirectory(
   dir: string,
   source: "user" | "project" | "plugin",
   prefix = "",
@@ -205,7 +205,7 @@ export const commandsRouter = router({
       const pluginCommandsPromises = enabledPlugins.map(async (plugin) => {
         const paths = getPluginComponentPaths(plugin)
         try {
-          const commands = await scanCommandsDirectory(paths.commands, "plugin")
+          const commands = await scanCommandsDirectory(paths.commands, "plugin", plugin.name)
           return commands.map((cmd) => ({ ...cmd, pluginName: plugin.source }))
         } catch {
           return []
