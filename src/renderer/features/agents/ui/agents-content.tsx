@@ -41,6 +41,7 @@ import {
 import { NewChatForm } from "../main/new-chat-form"
 import { KanbanView } from "../../kanban"
 import { AutomationsView, AutomationsDetailView, InboxView } from "../../automations"
+import { BrowserView } from "../../browser/browser-view"
 import { ChatView } from "../main/active-chat"
 import { api } from "../../../lib/mock-api"
 import { trpc } from "../../../lib/trpc"
@@ -860,9 +861,11 @@ export function AgentsContent() {
         data-agents-page
         data-mobile-view
       >
-        {/* Mobile: Settings/Automations/Inbox fullscreen views */}
+        {/* Mobile: Settings/Automations/Inbox/Browser fullscreen views */}
         {desktopView === "settings" ? (
           <SettingsContent />
+        ) : desktopView === "browser" ? (
+          <BrowserView />
         ) : betaAutomationsEnabled && desktopView === "automations" ? (
           <AutomationsView />
         ) : betaAutomationsEnabled && desktopView === "automations-detail" ? (
@@ -1002,6 +1005,8 @@ export function AgentsContent() {
         >
           {desktopView === "settings" ? (
             <SettingsContent />
+          ) : desktopView === "browser" ? (
+            <BrowserView />
           ) : betaAutomationsEnabled && desktopView === "automations" ? (
             <AutomationsView />
           ) : betaAutomationsEnabled && desktopView === "automations-detail" ? (

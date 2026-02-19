@@ -633,6 +633,7 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
       contextIsolation: true,
       sandbox: false, // Required for electron-trpc
       webSecurity: true,
+      webviewTag: true, // Required for multi-profile browser feature
       partition: "persist:main", // Use persistent session for cookies
     },
   })

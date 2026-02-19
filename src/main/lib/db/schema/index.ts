@@ -128,6 +128,53 @@ export const anthropicSettings = sqliteTable("anthropic_settings", {
   ),
 })
 
+// ============ BROWSER PROFILES ============
+// Isolated browser profiles for multi-session testing (different cookies/localStorage per profile)
+export const browserProfiles = sqliteTable("browser_profiles", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => createId()),
+  name: text("name").notNull(),
+  color: text("color").notNull(), // Hex color for visual identification
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date(),
+  ),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date(),
+  ),
+})
+
+export const browserProfilesRelations = relations(browserProfiles, ({ many }) => ({
+  tabs: many(browserTabs),
+}))
+
+// ============ BROWSER TABS ============
+// Persistent browser tabs (restored on app restart)
+export const browserTabs = sqliteTable("browser_tabs", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => createId()),
+  profileId: text("profile_id")
+    .notNull()
+    .references(() => browserProfiles.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  title: text("title"),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date(),
+  ),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date(),
+  ),
+})
+
+export const browserTabsRelations = relations(browserTabs, ({ one }) => ({
+  profile: one(browserProfiles, {
+    fields: [browserTabs.profileId],
+    references: [browserProfiles.id],
+  }),
+}))
+
 // ============ TYPE EXPORTS ============
 export type Project = typeof projects.$inferSelect
 export type NewProject = typeof projects.$inferInsert
@@ -140,3 +187,7 @@ export type NewClaudeCodeCredential = typeof claudeCodeCredentials.$inferInsert
 export type AnthropicAccount = typeof anthropicAccounts.$inferSelect
 export type NewAnthropicAccount = typeof anthropicAccounts.$inferInsert
 export type AnthropicSettings = typeof anthropicSettings.$inferSelect
+export type BrowserProfile = typeof browserProfiles.$inferSelect
+export type NewBrowserProfile = typeof browserProfiles.$inferInsert
+export type BrowserTab = typeof browserTabs.$inferSelect
+export type NewBrowserTab = typeof browserTabs.$inferInsert

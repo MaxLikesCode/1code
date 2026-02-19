@@ -1225,6 +1225,50 @@ const AutomationsButton = memo(function AutomationsButton() {
   )
 })
 
+// Isolated Browser Button - opens the multi-profile browser view
+const BrowserButton = memo(function BrowserButton() {
+  const desktopView = useAtomValue(desktopViewAtom)
+  const setSelectedChatId = useSetAtom(selectedAgentChatIdAtom)
+  const setSelectedDraftId = useSetAtom(selectedDraftIdAtom)
+  const setShowNewChatForm = useSetAtom(showNewChatFormAtom)
+  const setDesktopView = useSetAtom(desktopViewAtom)
+
+  const handleClick = useCallback(() => {
+    setSelectedChatId(null)
+    setSelectedDraftId(null)
+    setShowNewChatForm(false)
+    setDesktopView("browser")
+  }, [setSelectedChatId, setSelectedDraftId, setShowNewChatForm, setDesktopView])
+
+  const isActive = desktopView === "browser"
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className={cn(
+        "flex items-center gap-2.5 w-full pl-2 pr-2 py-1.5 rounded-md text-sm transition-colors duration-150",
+        isActive
+          ? "bg-foreground/5 text-foreground"
+          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+      )}
+    >
+      <SidebarBrowserIcon className="h-4 w-4" />
+      <span className="flex-1 text-left">Browser</span>
+    </button>
+  )
+})
+
+function SidebarBrowserIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  )
+}
+
 // Isolated Archive Section - subscribes to archivePopoverOpenAtom internally
 // to prevent sidebar re-renders when popover opens/closes
 interface ArchiveSectionProps {
@@ -3217,10 +3261,11 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      {/* Navigation Links - Inbox & Automations */}
+      {/* Navigation Links - Inbox, Automations, Browser */}
       <div className="px-2 pb-3 flex-shrink-0 space-y-0.5 -mx-1">
         <InboxButton />
         <AutomationsButton />
+        <BrowserButton />
       </div>
 
       {/* Scrollable Agents List */}
