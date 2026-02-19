@@ -1,3 +1,4 @@
+import { z } from "zod"
 import { router, publicProcedure } from "../index"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -5,6 +6,9 @@ import matter from "gray-matter"
 import { resolveDirentType } from "../../fs/dirent"
 import {
   discoverInstalledPlugins,
+  discoverAvailablePlugins,
+  installPlugin,
+  uninstallPlugin,
   getPluginComponentPaths,
   discoverPluginMcpServers,
   clearPluginCache,
@@ -231,4 +235,36 @@ export const pluginsRouter = router({
     clearPluginCache()
     return { success: true }
   }),
+
+  /**
+   * List available (not-yet-installed) plugins from marketplace repos
+   */
+  listAvailable: publicProcedure.query(async () => {
+    return await discoverAvailablePlugins()
+  }),
+
+  /**
+   * Install a plugin from a marketplace by cloning its git URL
+   */
+  install: publicProcedure
+    .input(z.object({
+      marketplace: z.string(),
+      pluginName: z.string(),
+      sourceUrl: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      return await installPlugin(input.marketplace, input.pluginName, input.sourceUrl)
+    }),
+
+  /**
+   * Uninstall a plugin (remove cache directory and installed_plugins.json entry)
+   */
+  uninstall: publicProcedure
+    .input(z.object({
+      marketplace: z.string(),
+      pluginName: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      return await uninstallPlugin(input.marketplace, input.pluginName)
+    }),
 })

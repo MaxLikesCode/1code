@@ -5,7 +5,7 @@ import { settingsPluginsSidebarWidthAtom } from "../../../features/agents/atoms"
 import { agentsSettingsDialogActiveTabAtom, type SettingsTab } from "../../../lib/atoms"
 import { trpc } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
-import { Terminal, ChevronRight, Loader2 } from "lucide-react"
+import { Terminal, ChevronRight, Loader2, Download } from "lucide-react"
 import { PluginFilledIcon, SkillIconFilled, CustomAgentIconFilled, OriginalMCPIcon } from "../../ui/icons"
 import { Button } from "../../ui/button"
 import { Label } from "../../ui/label"
@@ -285,6 +285,137 @@ function PluginListItem({
   )
 }
 
+// --- Available Plugin Types ---
+interface AvailablePluginData {
+  name: string
+  description?: string
+  marketplace: string
+  sourceUrl: string
+  category?: string
+  homepage?: string
+  tags?: string[]
+}
+
+function availablePluginKey(p: AvailablePluginData): string {
+  return `${p.name}@${p.marketplace}`
+}
+
+// --- Available Plugin List Item ---
+function AvailablePluginListItem({
+  plugin,
+  isSelected,
+  onSelect,
+}: {
+  plugin: AvailablePluginData
+  isSelected: boolean
+  onSelect: (key: string) => void
+}) {
+  const key = availablePluginKey(plugin)
+  return (
+    <button
+      data-item-id={key}
+      onClick={() => onSelect(key)}
+      className={cn(
+        "w-full text-left py-1.5 px-2 rounded-md transition-colors duration-150 cursor-pointer outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70 focus-visible:-outline-offset-2",
+        isSelected
+          ? "bg-foreground/5 text-foreground"
+          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm leading-tight truncate flex-1">{formatPluginName(plugin.name)}</span>
+        <Download className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+      </div>
+      {plugin.description && (
+        <div className="text-[11px] text-muted-foreground/60 truncate mt-0.5">
+          {plugin.description}
+        </div>
+      )}
+    </button>
+  )
+}
+
+// --- Available Plugin Detail Panel ---
+function AvailablePluginDetail({
+  plugin,
+  onInstall,
+  isInstalling,
+}: {
+  plugin: AvailablePluginData
+  onInstall: () => void
+  isInstalling: boolean
+}) {
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto p-6 space-y-5">
+          {/* Name & Install button */}
+          <div>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-foreground">{formatPluginName(plugin.name)}</h3>
+              <Button
+                variant="default"
+                size="sm"
+                className="h-7 px-3 text-xs"
+                disabled={isInstalling}
+                onClick={onInstall}
+              >
+                {isInstalling ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+                    Installing...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3 w-3 mr-1.5" />
+                    Install
+                  </>
+                )}
+              </Button>
+            </div>
+            {plugin.category && (
+              <p className="text-xs text-muted-foreground mt-0.5 capitalize">{plugin.category}</p>
+            )}
+          </div>
+
+          {/* Description */}
+          {plugin.description && (
+            <p className="text-sm text-muted-foreground">{plugin.description}</p>
+          )}
+
+          {/* Info */}
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Marketplace</Label>
+              <p className="text-sm text-foreground font-mono">{plugin.marketplace}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Source</Label>
+              <p className="text-sm text-foreground font-mono break-all">{plugin.sourceUrl}</p>
+            </div>
+            {plugin.homepage && (
+              <div className="space-y-1.5">
+                <Label>Homepage</Label>
+                <a href={plugin.homepage} target="_blank" rel="noopener noreferrer" className="block text-sm text-blue-400 hover:underline break-all">{plugin.homepage}</a>
+              </div>
+            )}
+            {plugin.tags && plugin.tags.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Tags</Label>
+                <div className="flex flex-wrap gap-1">
+                  {plugin.tags.map((tag) => (
+                    <span key={tag} className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{tag}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Main Component ---
 export function AgentsPluginsTab() {
   const [selectedPluginSource, setSelectedPluginSource] = useState<string | null>(null)
@@ -306,7 +437,14 @@ export function AgentsPluginsTab() {
     return () => document.removeEventListener("keydown", handler)
   }, [])
 
+  const [selectedAvailableKey, setSelectedAvailableKey] = useState<string | null>(null)
+
   const { data: plugins = [], isLoading, refetch } = trpc.plugins.list.useQuery(undefined, {
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Fetch available (not-yet-installed) plugins
+  const { data: availablePlugins = [], refetch: refetchAvailable } = trpc.plugins.listAvailable.useQuery(undefined, {
     staleTime: 5 * 60 * 1000,
   })
 
@@ -396,12 +534,84 @@ export function AgentsPluginsTab() {
 
   const selectedPlugin = plugins.find((p) => p.source === selectedPluginSource) || null
 
-  // Auto-select first plugin in display order (enabled first, then marketplace)
+  // Filter available plugins by search query
+  const filteredAvailable = useMemo(() => {
+    if (!searchQuery.trim()) return availablePlugins
+    const q = searchQuery.toLowerCase()
+    const qNoDashes = q.replace(/-/g, " ")
+    const qWithDashes = q.replace(/ /g, "-")
+    return availablePlugins.filter((p) => {
+      const name = p.name.toLowerCase()
+      if (name.includes(q) || name.includes(qNoDashes) || name.includes(qWithDashes)) return true
+      if (p.marketplace.toLowerCase().includes(q)) return true
+      if (p.description?.toLowerCase().includes(q)) return true
+      return false
+    })
+  }, [availablePlugins, searchQuery])
+
+  // Group available plugins by marketplace
+  const availableMarketplaceGroups = useMemo(() => {
+    const groups = new Map<string, AvailablePluginData[]>()
+    for (const plugin of filteredAvailable) {
+      const existing = groups.get(plugin.marketplace) || []
+      existing.push(plugin)
+      groups.set(plugin.marketplace, existing)
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [filteredAvailable])
+
+  const selectedAvailablePlugin = useMemo(() => {
+    if (!selectedAvailableKey) return null
+    return availablePlugins.find((p) => availablePluginKey(p) === selectedAvailableKey) || null
+  }, [selectedAvailableKey, availablePlugins])
+
+  // Selection helpers: selecting one type clears the other
+  const handleSelectInstalled = useCallback((source: string) => {
+    setSelectedPluginSource(source)
+    setSelectedAvailableKey(null)
+  }, [])
+
+  const handleSelectAvailable = useCallback((key: string) => {
+    setSelectedAvailableKey(key)
+    setSelectedPluginSource(null)
+  }, [])
+
+  // Auto-select first plugin in display order (enabled first, then marketplace, then available)
   useEffect(() => {
-    if (selectedPluginSource || isLoading || plugins.length === 0) return
-    const first = enabledPlugins[0] || marketplaceGroups[0]?.[1]?.[0]
-    if (first) setSelectedPluginSource(first.source)
-  }, [plugins, selectedPluginSource, isLoading, enabledPlugins, marketplaceGroups])
+    if (selectedPluginSource || selectedAvailableKey || isLoading) return
+    if (plugins.length > 0) {
+      const first = enabledPlugins[0] || marketplaceGroups[0]?.[1]?.[0]
+      if (first) { setSelectedPluginSource(first.source); return }
+    }
+    if (filteredAvailable.length > 0) {
+      setSelectedAvailableKey(availablePluginKey(filteredAvailable[0]))
+    }
+  }, [plugins, availablePlugins, selectedPluginSource, selectedAvailableKey, isLoading, enabledPlugins, marketplaceGroups, filteredAvailable])
+
+  const installMutation = trpc.plugins.install.useMutation()
+  const handleInstallPlugin = useCallback(async (plugin: AvailablePluginData) => {
+    try {
+      const result = await installMutation.mutateAsync({
+        marketplace: plugin.marketplace,
+        pluginName: plugin.name,
+        sourceUrl: plugin.sourceUrl,
+      })
+      if (result.success) {
+        toast.success("Plugin installed", {
+          description: formatPluginName(plugin.name),
+        })
+        // Clear available selection and refresh both lists
+        setSelectedAvailableKey(null)
+        await Promise.all([refetch(), refetchAvailable()])
+      } else {
+        toast.error("Installation failed", {
+          description: result.error || "Unknown error",
+        })
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Installation failed")
+    }
+  }, [installMutation, refetch, refetchAvailable])
 
   const approveAllMutation = trpc.claudeSettings.approveAllPluginMcpServers.useMutation()
   const revokeAllMutation = trpc.claudeSettings.revokeAllPluginMcpServers.useMutation()
@@ -470,7 +680,7 @@ export function AgentsPluginsTab() {
               <div className="flex items-center justify-center h-full">
                 <p className="text-xs text-muted-foreground">Loading...</p>
               </div>
-            ) : plugins.length === 0 ? (
+            ) : plugins.length === 0 && availablePlugins.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
                 <PluginFilledIcon className="h-8 w-8 text-border mb-3" />
                 <p className="text-sm text-muted-foreground mb-1">No plugins</p>
@@ -478,7 +688,7 @@ export function AgentsPluginsTab() {
                   Install plugins to ~/.claude/plugins/
                 </p>
               </div>
-            ) : filteredPlugins.length === 0 ? (
+            ) : filteredPlugins.length === 0 && filteredAvailable.length === 0 ? (
               <div className="flex items-center justify-center py-8">
                 <p className="text-xs text-muted-foreground">No results found</p>
               </div>
@@ -496,7 +706,7 @@ export function AgentsPluginsTab() {
                           key={plugin.source}
                           plugin={plugin}
                           isSelected={selectedPluginSource === plugin.source}
-                          onSelect={setSelectedPluginSource}
+                          onSelect={handleSelectInstalled}
                         />
                       ))}
                     </div>
@@ -515,7 +725,26 @@ export function AgentsPluginsTab() {
                           key={plugin.source}
                           plugin={plugin}
                           isSelected={selectedPluginSource === plugin.source}
-                          onSelect={setSelectedPluginSource}
+                          onSelect={handleSelectInstalled}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Available (not installed) plugins */}
+                {availableMarketplaceGroups.map(([marketplace, groupPlugins]) => (
+                  <div key={`available-${marketplace}`}>
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-2 mb-1">
+                      Available &middot; {marketplace}
+                    </p>
+                    <div className="space-y-0.5">
+                      {groupPlugins.map((plugin) => (
+                        <AvailablePluginListItem
+                          key={availablePluginKey(plugin)}
+                          plugin={plugin}
+                          isSelected={selectedAvailableKey === availablePluginKey(plugin)}
+                          onSelect={handleSelectAvailable}
                         />
                       ))}
                     </div>
@@ -539,15 +768,21 @@ export function AgentsPluginsTab() {
             onMcpAuth={handleMcpAuth}
             isAuthenticating={startOAuthMutation.isPending}
           />
+        ) : selectedAvailablePlugin ? (
+          <AvailablePluginDetail
+            plugin={selectedAvailablePlugin}
+            onInstall={() => handleInstallPlugin(selectedAvailablePlugin)}
+            isInstalling={installMutation.isPending}
+          />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center px-4">
             <PluginFilledIcon className="h-12 w-12 text-border mb-4" />
             <p className="text-sm text-muted-foreground">
-              {plugins.length > 0
+              {plugins.length > 0 || availablePlugins.length > 0
                 ? "Select a plugin to view details"
-                : "No plugins installed"}
+                : "No plugins found"}
             </p>
-            {plugins.length === 0 && (
+            {plugins.length === 0 && availablePlugins.length === 0 && (
               <p className="text-xs text-muted-foreground/70 mt-2">
                 Install plugins to ~/.claude/plugins/marketplaces/
               </p>

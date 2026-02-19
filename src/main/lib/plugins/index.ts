@@ -2,8 +2,12 @@ import * as fs from "fs/promises"
 import type { Dirent } from "fs"
 import * as path from "path"
 import * as os from "os"
+import { execFile } from "child_process"
+import { promisify } from "util"
 import type { McpServerConfig } from "../claude-config"
 import { isDirentDirectory } from "../fs/dirent"
+
+const execFileAsync = promisify(execFile)
 
 export interface PluginInfo {
   name: string
@@ -35,6 +39,49 @@ interface MarketplaceJson {
 export interface PluginMcpConfig {
   pluginSource: string // e.g., "ccsetup:ccsetup"
   mcpServers: Record<string, McpServerConfig>
+}
+
+// installed_plugins.json entry structure (from Claude Code CLI)
+interface InstalledPluginEntry {
+  scope: string
+  installPath: string
+  version: string
+  installedAt: string
+  lastUpdated: string
+  gitCommitSha?: string
+}
+
+// installed_plugins.json format: { version: 2, plugins: { "name@marketplace": [entry, ...] } }
+interface InstalledPluginsJson {
+  version: number
+  plugins: Record<string, InstalledPluginEntry[]>
+}
+
+/**
+ * Read ~/.claude/plugins/installed_plugins.json to get install paths
+ * Returns a map of "pluginName@marketplace" -> installPath
+ */
+async function loadInstalledPluginPaths(): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+  const installedPath = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
+  try {
+    const content = await fs.readFile(installedPath, "utf-8")
+    const data: InstalledPluginsJson = JSON.parse(content)
+    if (data.plugins && typeof data.plugins === "object") {
+      for (const [key, entries] of Object.entries(data.plugins)) {
+        if (Array.isArray(entries) && entries.length > 0) {
+          // Use the most recent entry (last in array)
+          const latest = entries[entries.length - 1]!
+          if (latest.installPath) {
+            result.set(key, latest.installPath)
+          }
+        }
+      }
+    }
+  } catch {
+    // installed_plugins.json doesn't exist or can't be parsed
+  }
+  return result
 }
 
 // Cache for plugin discovery results
@@ -79,6 +126,10 @@ export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
     return plugins
   }
 
+  // Load installed plugin paths from installed_plugins.json
+  // This is the authoritative source for where plugins are actually installed
+  const installedPaths = await loadInstalledPluginPaths()
+
   for (const marketplace of marketplaces) {
     if (marketplace.name.startsWith(".")) continue
 
@@ -106,17 +157,39 @@ export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
       }
 
       for (const plugin of marketplaceJson.plugins) {
-        // Validate plugin.source exists
-        if (!plugin.source) continue
-
-        // source can be a string path or an object { source: "url", url: "..." }
-        const sourcePath = typeof plugin.source === "string" ? plugin.source : null
-        if (!sourcePath) continue
-
-        const pluginPath = path.resolve(marketplacePath, sourcePath)
         try {
-          const pluginStat = await fs.stat(pluginPath)
-          if (!pluginStat.isDirectory()) continue
+          // Validate plugin.source exists
+          if (!plugin.source) continue
+
+          let pluginPath: string | null = null
+
+          // 1. Check installed_plugins.json for cached install path (works for all source types)
+          const installedKey = `${plugin.name}@${marketplaceJson.name}`
+          const installedPath = installedPaths.get(installedKey)
+          if (installedPath) {
+            const exists = await fs
+              .stat(installedPath)
+              .then((s) => s.isDirectory())
+              .catch(() => false)
+            if (exists) {
+              pluginPath = installedPath
+            }
+          }
+
+          // 2. Fallback: resolve string source paths relative to marketplace dir
+          if (!pluginPath && typeof plugin.source === "string") {
+            const resolved = path.resolve(marketplacePath, plugin.source)
+            const exists = await fs
+              .stat(resolved)
+              .then((s) => s.isDirectory())
+              .catch(() => false)
+            if (exists) {
+              pluginPath = resolved
+            }
+          }
+
+          if (!pluginPath) continue
+
           plugins.push({
             name: plugin.name,
             version: plugin.version || "0.0.0",
@@ -128,12 +201,21 @@ export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
             homepage: plugin.homepage,
             tags: plugin.tags,
           })
-        } catch {
-          // Plugin directory not found, skip
+        } catch (pluginErr) {
+          console.warn(
+            `[plugins] Error processing plugin ${plugin.name} in ${marketplace.name}:`,
+            pluginErr instanceof Error ? pluginErr.message : pluginErr,
+          )
         }
       }
-    } catch {
-      // No marketplace.json, skip silently (expected for non-plugin directories)
+    } catch (marketplaceErr) {
+      // Log non-ENOENT errors for debugging
+      if ((marketplaceErr as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.warn(
+          `[plugins] Error processing marketplace ${marketplace.name}:`,
+          marketplaceErr instanceof Error ? marketplaceErr.message : marketplaceErr,
+        )
+      }
     }
   }
 
@@ -208,4 +290,227 @@ export async function discoverPluginMcpServers(): Promise<PluginMcpConfig[]> {
   // Cache the result
   mcpCache = { configs, timestamp: Date.now() }
   return configs
+}
+
+// ============================================
+// Available (not-yet-installed) Plugin Discovery
+// ============================================
+
+export interface AvailablePlugin {
+  name: string
+  description?: string
+  marketplace: string
+  sourceUrl: string
+  category?: string
+  homepage?: string
+  tags?: string[]
+}
+
+/**
+ * Discover plugins from marketplace.json files that are not yet installed locally.
+ * These are URL-based plugins whose source hasn't been git-cloned.
+ */
+export async function discoverAvailablePlugins(): Promise<AvailablePlugin[]> {
+  const available: AvailablePlugin[] = []
+  const marketplacesDir = path.join(os.homedir(), ".claude", "plugins", "marketplaces")
+
+  try {
+    await fs.access(marketplacesDir)
+  } catch {
+    return available
+  }
+
+  let marketplaces: Dirent[]
+  try {
+    marketplaces = await fs.readdir(marketplacesDir, { withFileTypes: true })
+  } catch {
+    return available
+  }
+
+  // Load installed plugin keys
+  const installedPaths = await loadInstalledPluginPaths()
+
+  for (const marketplace of marketplaces) {
+    if (marketplace.name.startsWith(".")) continue
+
+    const isMarketplaceDir = await isDirentDirectory(marketplacesDir, marketplace)
+    if (!isMarketplaceDir) continue
+
+    const marketplacePath = path.join(marketplacesDir, marketplace.name)
+    const marketplaceJsonPath = path.join(marketplacePath, ".claude-plugin", "marketplace.json")
+
+    try {
+      const content = await fs.readFile(marketplaceJsonPath, "utf-8")
+      let marketplaceJson: MarketplaceJson
+      try {
+        marketplaceJson = JSON.parse(content)
+      } catch {
+        continue
+      }
+
+      if (!Array.isArray(marketplaceJson.plugins)) continue
+
+      for (const plugin of marketplaceJson.plugins) {
+        // Only consider URL-based plugins that aren't installed
+        if (!plugin.source || typeof plugin.source !== "object" || !plugin.source.url) continue
+
+        const installedKey = `${plugin.name}@${marketplaceJson.name}`
+        if (installedPaths.has(installedKey)) continue
+
+        available.push({
+          name: plugin.name,
+          description: plugin.description,
+          marketplace: marketplaceJson.name,
+          sourceUrl: plugin.source.url,
+          category: plugin.category,
+          homepage: plugin.homepage,
+          tags: plugin.tags,
+        })
+      }
+    } catch {
+      // Skip marketplaces that can't be read
+    }
+  }
+
+  return available
+}
+
+// ============================================
+// Plugin Installation
+// ============================================
+
+const INSTALLED_PLUGINS_PATH = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
+
+/**
+ * Read and parse installed_plugins.json, creating it if it doesn't exist
+ */
+async function readInstalledPluginsJson(): Promise<InstalledPluginsJson> {
+  try {
+    const content = await fs.readFile(INSTALLED_PLUGINS_PATH, "utf-8")
+    return JSON.parse(content)
+  } catch {
+    return { version: 2, plugins: {} }
+  }
+}
+
+/**
+ * Write installed_plugins.json
+ */
+async function writeInstalledPluginsJson(data: InstalledPluginsJson): Promise<void> {
+  await fs.mkdir(path.dirname(INSTALLED_PLUGINS_PATH), { recursive: true })
+  await fs.writeFile(INSTALLED_PLUGINS_PATH, JSON.stringify(data, null, 2), "utf-8")
+}
+
+/**
+ * Install a plugin by cloning its git URL into the cache directory.
+ * Updates installed_plugins.json and clears caches.
+ */
+export async function installPlugin(
+  marketplace: string,
+  pluginName: string,
+  sourceUrl: string,
+): Promise<{ success: boolean; installPath?: string; error?: string }> {
+  try {
+    // Clone to a temp directory first, then move to versioned cache path
+    const cacheBase = path.join(os.homedir(), ".claude", "plugins", "cache", marketplace, pluginName)
+    await fs.mkdir(cacheBase, { recursive: true })
+
+    // Clone into a temp dir
+    const tempDir = path.join(cacheBase, "_cloning")
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true })
+    } catch { /* ok */ }
+
+    await execFileAsync("git", ["clone", "--depth", "1", sourceUrl, tempDir], {
+      timeout: 120_000, // 2 min timeout
+    })
+
+    // Try to read version from package.json
+    let version = "0.0.0"
+    let gitCommitSha: string | undefined
+    try {
+      const pkgContent = await fs.readFile(path.join(tempDir, "package.json"), "utf-8")
+      const pkg = JSON.parse(pkgContent)
+      if (typeof pkg.version === "string") version = pkg.version
+    } catch { /* no package.json, use default version */ }
+
+    // Get git commit SHA
+    try {
+      const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: tempDir })
+      gitCommitSha = stdout.trim()
+    } catch { /* ok */ }
+
+    // Move to versioned directory
+    const installPath = path.join(cacheBase, version)
+    try {
+      await fs.rm(installPath, { recursive: true, force: true })
+    } catch { /* ok */ }
+    await fs.rename(tempDir, installPath)
+
+    // Update installed_plugins.json
+    const data = await readInstalledPluginsJson()
+    const key = `${pluginName}@${marketplace}`
+    const now = new Date().toISOString()
+    const entry: InstalledPluginEntry = {
+      scope: "user",
+      installPath,
+      version,
+      installedAt: now,
+      lastUpdated: now,
+      gitCommitSha,
+    }
+
+    if (!data.plugins[key]) {
+      data.plugins[key] = []
+    }
+    data.plugins[key].push(entry)
+    await writeInstalledPluginsJson(data)
+
+    // Clear caches so new plugin is discovered
+    clearPluginCache()
+
+    return { success: true, installPath }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+/**
+ * Uninstall a plugin by removing its cache directory and installed_plugins.json entry.
+ */
+export async function uninstallPlugin(
+  marketplace: string,
+  pluginName: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const key = `${pluginName}@${marketplace}`
+
+    // Remove from installed_plugins.json
+    const data = await readInstalledPluginsJson()
+    const entries = data.plugins[key]
+    if (entries && entries.length > 0) {
+      // Remove the cache directory for the latest entry
+      const latest = entries[entries.length - 1]!
+      if (latest.installPath) {
+        try {
+          await fs.rm(latest.installPath, { recursive: true, force: true })
+        } catch { /* ok if dir doesn't exist */ }
+      }
+    }
+    delete data.plugins[key]
+    await writeInstalledPluginsJson(data)
+
+    // Clear caches
+    clearPluginCache()
+
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
