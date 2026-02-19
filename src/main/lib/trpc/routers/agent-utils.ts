@@ -28,6 +28,56 @@ export interface FileAgent extends ParsedAgent {
 }
 
 /**
+ * Fallback parser for agent markdown when gray-matter fails.
+ * Uses simple regex to extract frontmatter fields.
+ * Handles descriptions with special YAML characters (\n, <example> tags, etc.)
+ */
+function parseAgentMdFallback(
+  content: string,
+  filename: string,
+): Partial<ParsedAgent> {
+  // Match --- delimited frontmatter block
+  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/)
+  if (!fmMatch) {
+    // No frontmatter - treat entire content as prompt
+    return {
+      name: filename.replace(".md", ""),
+      description: "",
+      prompt: content.trim(),
+    }
+  }
+
+  const frontmatter = fmMatch[1]!
+  const body = fmMatch[2]!
+
+  // Simple key: value extraction (single-line values only)
+  const extractField = (key: string): string | undefined => {
+    const re = new RegExp(`^${key}:\\s*(.+)$`, "m")
+    const match = frontmatter.match(re)
+    return match ? match[1]!.trim().replace(/^["']|["']$/g, "") : undefined
+  }
+
+  const name = extractField("name") || filename.replace(".md", "")
+  const description = extractField("description") || ""
+  const toolsRaw = extractField("tools")
+  const disallowedToolsRaw = extractField("disallowedTools")
+  const modelRaw = extractField("model")
+
+  const tools = toolsRaw
+    ? toolsRaw.split(",").map((t) => t.trim()).filter(Boolean)
+    : undefined
+  const disallowedTools = disallowedToolsRaw
+    ? disallowedToolsRaw.split(",").map((t) => t.trim()).filter(Boolean)
+    : undefined
+  const model =
+    modelRaw && VALID_AGENT_MODELS.includes(modelRaw as AgentModel)
+      ? (modelRaw as AgentModel)
+      : undefined
+
+  return { name, description, prompt: body.trim(), tools, disallowedTools, model }
+}
+
+/**
  * Parse agent markdown file with YAML frontmatter
  * Format:
  * ---
@@ -84,8 +134,11 @@ export function parseAgentMd(
       model,
     }
   } catch (err) {
-    console.error("[agents] Failed to parse markdown:", err)
-    return {}
+    console.warn(
+      `[agents] gray-matter failed for ${filename}, trying fallback parser:`,
+      err instanceof Error ? err.message : err,
+    )
+    return parseAgentMdFallback(content, filename)
   }
 }
 
@@ -135,10 +188,10 @@ export async function loadAgent(
       const content = await fs.readFile(agentPath, "utf-8")
       const parsed = parseAgentMd(content, `${name}.md`)
 
-      if (parsed.description && parsed.prompt) {
+      if (parsed.prompt) {
         return {
           name: parsed.name || name,
-          description: parsed.description,
+          description: parsed.description || "",
           prompt: parsed.prompt,
           tools: parsed.tools,
           disallowedTools: parsed.disallowedTools,
@@ -165,10 +218,10 @@ export async function loadAgent(
       try {
         const content = await fs.readFile(agentPath, "utf-8")
         const parsed = parseAgentMd(content, `${name}.md`)
-        if (parsed.description && parsed.prompt) {
+        if (parsed.prompt) {
           return {
             name: parsed.name || name,
-            description: parsed.description,
+            description: parsed.description || "",
             prompt: parsed.prompt,
             tools: parsed.tools,
             disallowedTools: parsed.disallowedTools,
@@ -216,7 +269,7 @@ export async function scanAgentsDirectory(
           const content = await fs.readFile(agentPath, "utf-8")
           const parsed = parseAgentMd(content, entry.name)
 
-          if (parsed.description && parsed.prompt) {
+          if (parsed.prompt) {
             // For project agents, show relative path; for user agents, show ~/.claude/... path
             let displayPath: string
             if (source === "project" && basePath) {
@@ -231,7 +284,7 @@ export async function scanAgentsDirectory(
 
             agents.push({
               name: parsed.name || entry.name.replace(".md", ""),
-              description: parsed.description,
+              description: parsed.description || "",
               prompt: parsed.prompt,
               tools: parsed.tools,
               disallowedTools: parsed.disallowedTools,
@@ -239,6 +292,8 @@ export async function scanAgentsDirectory(
               source,
               path: displayPath,
             })
+          } else {
+            console.warn(`[agents] Skipping ${entry.name}: no prompt body found`)
           }
         } catch (err) {
           console.error(`[agents] Failed to read agent ${entry.name}:`, err)
