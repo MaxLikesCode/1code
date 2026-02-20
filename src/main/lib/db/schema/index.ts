@@ -175,20 +175,6 @@ export const browserTabsRelations = relations(browserTabs, ({ one }) => ({
   }),
 }))
 
-// ============ BROWSER EXTENSIONS ============
-// Chrome extensions loaded into browser profile sessions
-export const browserExtensions = sqliteTable("browser_extensions", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => createId()),
-  name: text("name").notNull(),
-  path: text("path").notNull().unique(), // Absolute path to unpacked extension directory
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
-    () => new Date(),
-  ),
-})
-
 // ============ TYPE EXPORTS ============
 export type Project = typeof projects.$inferSelect
 export type NewProject = typeof projects.$inferInsert
@@ -205,5 +191,3 @@ export type BrowserProfile = typeof browserProfiles.$inferSelect
 export type NewBrowserProfile = typeof browserProfiles.$inferInsert
 export type BrowserTab = typeof browserTabs.$inferSelect
 export type NewBrowserTab = typeof browserTabs.$inferInsert
-export type BrowserExtension = typeof browserExtensions.$inferSelect
-export type NewBrowserExtension = typeof browserExtensions.$inferInsert

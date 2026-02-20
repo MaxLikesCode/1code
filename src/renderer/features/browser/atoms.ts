@@ -21,6 +21,3 @@ export const profileManagerOpenAtom = atom(false)
 
 // New tab dialog open state
 export const newTabDialogOpenAtom = atom(false)
-
-// Extension manager dialog open state
-export const extensionManagerOpenAtom = atom(false)
