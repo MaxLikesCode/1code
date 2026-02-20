@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { ArrowUpRight, TerminalSquare, Box, ListTodo } from "lucide-react"
+import { ArrowUpRight, TerminalSquare, Box, ListTodo, Play } from "lucide-react"
 import { ResizableSidebar } from "@/components/ui/resizable-sidebar"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,6 +28,7 @@ import {
   detailsSidebarTabAtom,
   widgetVisibilityAtomFamily,
   widgetOrderAtomFamily,
+  expandedWidgetAtomFamily,
   WIDGET_REGISTRY,
   type WidgetId,
   type DetailsSidebarTab,
@@ -39,6 +40,7 @@ import { PlanWidget } from "./sections/plan-widget"
 import { TerminalWidget } from "./sections/terminal-widget"
 import { ChangesWidget } from "./sections/changes-widget"
 import { McpWidget } from "./sections/mcp-widget"
+import { TasksWidget } from "./sections/tasks-widget"
 import { FilesTab, type FilesTabHandle } from "./sections/files-tab"
 import type { ParsedDiffFile } from "./types"
 import { fileViewerOpenAtomFamily, type AgentMode } from "../agents/atoms"
@@ -65,6 +67,8 @@ function getWidgetIcon(widgetId: WidgetId) {
       return DiffIcon
     case "mcp":
       return OriginalMCPIcon
+    case "tasks":
+      return Play
     default:
       return Box
   }
@@ -252,6 +256,13 @@ export function DetailsSidebar({
     setSettingsTab("mcp")
     setSettingsOpen(true)
   }, [setSettingsTab, setSettingsOpen])
+
+  // Per-workspace expanded widget (for canExpand widgets like Tasks)
+  const expandedWidgetAtom = useMemo(
+    () => expandedWidgetAtomFamily(chatId),
+    [chatId],
+  )
+  const setExpandedWidget = useSetAtom(expandedWidgetAtom)
 
   // Per-workspace widget visibility
   const widgetVisibilityAtom = useMemo(
@@ -520,6 +531,22 @@ export function DetailsSidebar({
                     hideExpand
                   >
                     <McpWidget />
+                  </WidgetCard>
+                )
+
+              case "tasks":
+                if (!worktreePath) return null
+                return (
+                  <WidgetCard
+                    key="tasks"
+                    widgetId="tasks"
+                    title="Tasks"
+                    onExpand={() => setExpandedWidget("tasks")}
+                  >
+                    <TasksWidget
+                      worktreePath={worktreePath}
+                      workspaceId={chatId}
+                    />
                   </WidgetCard>
                 )
 

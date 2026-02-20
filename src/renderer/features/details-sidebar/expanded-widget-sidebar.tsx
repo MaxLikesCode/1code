@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Kbd } from "@/components/ui/kbd"
+import { cn } from "@/lib/utils"
 import {
   expandedWidgetAtomFamily,
   expandedWidgetSidebarWidthAtom,
@@ -21,6 +22,7 @@ import { InfoSection } from "./sections/info-section"
 import { PlanSection } from "./sections/plan-section"
 import { TerminalSection } from "./sections/terminal-section"
 import { DiffSection } from "./sections/diff-section"
+import { TasksSection } from "./sections/tasks-section"
 
 interface ExpandedWidgetSidebarProps {
   /** Workspace/chat ID */
@@ -122,6 +124,14 @@ export function ExpandedWidgetSidebar({
             isExpanded
           />
         )
+      case "tasks":
+        return worktreePath ? (
+          <TasksSection
+            worktreePath={worktreePath}
+            workspaceId={chatId}
+            isExpanded
+          />
+        ) : null
       default:
         return null
     }
@@ -173,7 +183,7 @@ export function ExpandedWidgetSidebar({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className={cn("flex-1", expandedWidget === "tasks" ? "overflow-hidden" : "overflow-y-auto")}>
           {renderWidgetContent()}
         </div>
       </div>

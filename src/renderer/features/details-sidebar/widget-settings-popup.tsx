@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useAtom } from "jotai"
-import { GripVertical, Box, TerminalSquare, ListTodo } from "lucide-react"
+import { GripVertical, Box, TerminalSquare, ListTodo, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Popover,
@@ -40,6 +40,8 @@ function getWidgetIcon(widgetId: WidgetId) {
       return DiffIcon
     case "mcp":
       return OriginalMCPIcon
+    case "tasks":
+      return Play
     default:
       return Box
   }
