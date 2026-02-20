@@ -2,7 +2,7 @@
   "name": "21st-desktop",
   "version": "0.0.66",
   "private": true,
-  "description": "1Code - UI for parallel work with AI agents",
+  "description": "1Code Pro Max - UI for parallel work with AI agents",
   "author": {
     "name": "21st.dev",
     "email": "support@21st.dev"
@@ -140,11 +140,11 @@
   },
   "build": {
     "appId": "dev.21st.agents",
-    "productName": "1Code",
+    "productName": "1Code Pro Max",
     "npmRebuild": true,
     "protocols": [
       {
-        "name": "1Code",
+        "name": "1Code Pro Max",
         "schemes": [
           "twentyfirst-agents"
         ]
@@ -206,7 +206,7 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "1Code needs microphone access for voice dictation"
+        "NSMicrophoneUsageDescription": "1Code Pro Max needs microphone access for voice dictation"
       }
     },
     "dmg": {

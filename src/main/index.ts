@@ -312,7 +312,7 @@ const server = createServer((req, res) => {
 <head>
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
-  <title>1Code - Authentication</title>
+  <title>1Code Pro Max - Authentication</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
@@ -396,7 +396,7 @@ const server = createServer((req, res) => {
 <head>
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
-  <title>1Code - MCP Authentication</title>
+  <title>1Code Pro Max - MCP Authentication</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
@@ -569,7 +569,7 @@ if (gotTheLock) {
       app.setAppUserModelId(IS_DEV ? "dev.21st.1code.dev" : "dev.21st.1code")
     }
 
-    console.log(`[App] Starting 1Code${IS_DEV ? " (DEV)" : ""}...`)
+    console.log(`[App] Starting 1Code Pro Max${IS_DEV ? " (DEV)" : ""}...`)
 
     // Verify protocol registration after app is ready
     // This helps diagnose first-install issues where the protocol isn't recognized yet
@@ -593,7 +593,7 @@ if (gotTheLock) {
 
     // Set About panel options with Claude Code version
     app.setAboutPanelOptions({
-      applicationName: "1Code",
+      applicationName: "1Code Pro Max",
       applicationVersion: app.getVersion(),
       version: `Claude Code ${claudeCodeVersion}`,
       copyright: "Copyright © 2026 21st.dev",
@@ -623,7 +623,7 @@ if (gotTheLock) {
           label: app.name,
           submenu: [
             {
-              label: "About 1Code",
+              label: "About 1Code Pro Max",
               click: () => app.showAboutPanel(),
             },
             {
@@ -683,7 +683,7 @@ if (gotTheLock) {
                       type: "info",
                       message: "CLI command installed",
                       detail:
-                        "You can now use '1code .' in any terminal to open 1Code in that directory.",
+                        "You can now use '1code .' in any terminal to open 1Code Pro Max in that directory.",
                     })
                     buildMenu()
                   } else {
