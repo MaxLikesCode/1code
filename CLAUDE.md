@@ -21,6 +21,10 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Commits
+
+- Never mention Claude, AI, or any assistant in commit messages. No `Co-Authored-By` lines, no references to AI-generated code. Commits should read as if written by a human developer.
+
 ## What is this?
 
 **21st Agents** - A local-first Electron desktop app for AI-powered code assistance. Users create chat sessions linked to local project folders, interact with Claude in Plan or Agent mode, and see real-time tool execution (bash, file edits, web search, etc.).
