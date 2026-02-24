@@ -45,9 +45,29 @@ async function readClaudeSettings(): Promise<Record<string, unknown>> {
 }
 
 /**
+ * Parse enabledPlugins from settings, handling both formats:
+ * - Dictionary format (correct): { "plugin-id": true, "other-plugin": true }
+ * - Legacy array format: ["plugin-id", "other-plugin"]
+ * Returns the dictionary as-is, or converts array to dictionary.
+ */
+function parseEnabledPluginsDict(settings: Record<string, unknown>): Record<string, boolean> {
+  if (settings.enabledPlugins && typeof settings.enabledPlugins === "object" && !Array.isArray(settings.enabledPlugins)) {
+    return { ...(settings.enabledPlugins as Record<string, boolean>) }
+  }
+  if (Array.isArray(settings.enabledPlugins)) {
+    const dict: Record<string, boolean> = {}
+    for (const id of settings.enabledPlugins as string[]) {
+      dict[id] = true
+    }
+    return dict
+  }
+  return {}
+}
+
+/**
  * Get list of enabled plugin identifiers from settings.json
- * Plugins are DISABLED by default — only plugins explicitly in this list are active.
- * Returns empty array if no plugins have been enabled.
+ * Claude Code CLI stores enabledPlugins as a dictionary: { "plugin-id": true }
+ * This function reads the dictionary and returns the list of keys with value true.
  * Results are cached for 5 seconds to reduce filesystem reads.
  */
 export async function getEnabledPlugins(): Promise<string[]> {
@@ -57,7 +77,10 @@ export async function getEnabledPlugins(): Promise<string[]> {
   }
 
   const settings = await readClaudeSettings()
-  const plugins = Array.isArray(settings.enabledPlugins) ? settings.enabledPlugins as string[] : []
+  const dict = parseEnabledPluginsDict(settings)
+  const plugins = Object.entries(dict)
+    .filter(([, enabled]) => enabled)
+    .map(([id]) => id)
 
   enabledPluginsCache = { plugins, timestamp: Date.now() }
   return plugins
@@ -145,7 +168,7 @@ export const claudeSettingsRouter = router({
 
   /**
    * Set a plugin's enabled state
-   * Plugins are disabled by default — adding to enabledPlugins activates them.
+   * Claude Code CLI expects enabledPlugins as a dictionary: { "plugin-id": true }
    */
   setPluginEnabled: publicProcedure
     .input(
@@ -156,15 +179,12 @@ export const claudeSettingsRouter = router({
     )
     .mutation(async ({ input }) => {
       const settings = await readClaudeSettings()
-      const enabledPlugins = Array.isArray(settings.enabledPlugins)
-        ? (settings.enabledPlugins as string[])
-        : []
+      const enabledPlugins = parseEnabledPluginsDict(settings)
 
-      if (input.enabled && !enabledPlugins.includes(input.pluginSource)) {
-        enabledPlugins.push(input.pluginSource)
-      } else if (!input.enabled) {
-        const index = enabledPlugins.indexOf(input.pluginSource)
-        if (index > -1) enabledPlugins.splice(index, 1)
+      if (input.enabled) {
+        enabledPlugins[input.pluginSource] = true
+      } else {
+        delete enabledPlugins[input.pluginSource]
       }
 
       settings.enabledPlugins = enabledPlugins
