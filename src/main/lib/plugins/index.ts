@@ -14,7 +14,7 @@ export interface PluginInfo {
   version: string
   description?: string
   path: string
-  source: string // e.g., "marketplace:plugin-name"
+  source: string // e.g., "plugin-name@marketplace" (matches Claude Code CLI format)
   marketplace: string // e.g., "claude-plugins-official"
   category?: string
   homepage?: string
@@ -37,7 +37,7 @@ interface MarketplaceJson {
 }
 
 export interface PluginMcpConfig {
-  pluginSource: string // e.g., "ccsetup:ccsetup"
+  pluginSource: string // e.g., "plugin-name@marketplace"
   mcpServers: Record<string, McpServerConfig>
 }
 
@@ -195,7 +195,7 @@ export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
             version: plugin.version || "0.0.0",
             description: plugin.description,
             path: pluginPath,
-            source: `${marketplaceJson.name}:${plugin.name}`,
+            source: `${plugin.name}@${marketplaceJson.name}`,
             marketplace: marketplaceJson.name,
             category: plugin.category,
             homepage: plugin.homepage,
