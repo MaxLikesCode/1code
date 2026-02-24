@@ -26,6 +26,7 @@ export const projects = sqliteTable("projects", {
 
 export const projectsRelations = relations(projects, ({ many }) => ({
   chats: many(chats),
+  stackServices: many(stackServices),
 }))
 
 // ============ CHATS ============
@@ -175,6 +176,40 @@ export const browserTabsRelations = relations(browserTabs, ({ one }) => ({
   }),
 }))
 
+// ============ STACK SERVICES ============
+// Services that make up a project's dev stack (DB, API, frontend, etc.)
+export const stackServices = sqliteTable("stack_services", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => createId()),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  command: text("command").notNull(),
+  cwd: text("cwd"), // Relative to project root, defaults to "."
+  env: text("env"), // JSON object of env vars
+  dependsOn: text("depends_on"), // JSON array of service names
+  healthCheck: text("health_check"), // Shell command to check readiness
+  port: integer("port"), // Expected port, for conflict detection
+  sortOrder: integer("sort_order").default(0),
+  source: text("source").notNull().default("manual"), // "auto" | "manual"
+  autoSource: text("auto_source"), // e.g. "docker-compose.yml", "package.json:dev"
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date(),
+  ),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date(),
+  ),
+})
+
+export const stackServicesRelations = relations(stackServices, ({ one }) => ({
+  project: one(projects, {
+    fields: [stackServices.projectId],
+    references: [projects.id],
+  }),
+}))
+
 // ============ TYPE EXPORTS ============
 export type Project = typeof projects.$inferSelect
 export type NewProject = typeof projects.$inferInsert
@@ -191,3 +226,5 @@ export type BrowserProfile = typeof browserProfiles.$inferSelect
 export type NewBrowserProfile = typeof browserProfiles.$inferInsert
 export type BrowserTab = typeof browserTabs.$inferSelect
 export type NewBrowserTab = typeof browserTabs.$inferInsert
+export type StackService = typeof stackServices.$inferSelect
+export type NewStackService = typeof stackServices.$inferInsert

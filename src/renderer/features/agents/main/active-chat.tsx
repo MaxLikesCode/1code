@@ -5536,6 +5536,9 @@ export function ChatView({
   const worktreePath = agentChat?.worktreePath as string | null
   // Desktop: original project path for MCP config lookup
   const originalProjectPath = (agentChat as any)?.project?.path as string | undefined
+  // Desktop: project ID and path for stack services
+  const stackProjectId = (agentChat as any)?.projectId as string | null ?? null
+  const stackProjectPath = originalProjectPath ?? null
 
   // Terminal scope key: shared by project path (local mode) or isolated per workspace (worktree)
   const terminalScopeKey = useMemo(() => {
@@ -7839,6 +7842,8 @@ Make sure to preserve all functionality from both branches when resolving confli
         {isUnifiedSidebarEnabled && !isMobileFullscreen && (worktreePath || sandboxId) && (
           <DetailsSidebar
             chatId={chatId}
+            projectId={stackProjectId}
+            projectPath={stackProjectPath}
             worktreePath={worktreePath}
             planPath={currentPlanPath}
             mode={currentMode}

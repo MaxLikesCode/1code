@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { ArrowUpRight, TerminalSquare, Box, ListTodo, Play } from "lucide-react"
+import { ArrowUpRight, TerminalSquare, Box, ListTodo, Play, Zap } from "lucide-react"
 import { ResizableSidebar } from "@/components/ui/resizable-sidebar"
 import { Button } from "@/components/ui/button"
 import {
@@ -41,6 +41,7 @@ import { TerminalWidget } from "./sections/terminal-widget"
 import { ChangesWidget } from "./sections/changes-widget"
 import { McpWidget } from "./sections/mcp-widget"
 import { TasksWidget } from "./sections/tasks-widget"
+import { StackWidget } from "./sections/stack-widget"
 import { FilesTab, type FilesTabHandle } from "./sections/files-tab"
 import type { ParsedDiffFile } from "./types"
 import { fileViewerOpenAtomFamily, type AgentMode } from "../agents/atoms"
@@ -69,6 +70,8 @@ function getWidgetIcon(widgetId: WidgetId) {
       return OriginalMCPIcon
     case "tasks":
       return Play
+    case "stack":
+      return Zap
     default:
       return Box
   }
@@ -150,6 +153,10 @@ function WidgetCard({
 interface DetailsSidebarProps {
   /** Workspace/chat ID */
   chatId: string
+  /** Project ID for stack services */
+  projectId: string | null
+  /** Original project path (for stack auto-detection) */
+  projectPath: string | null
   /** Worktree path for terminal */
   worktreePath: string | null
   /** Plan path for plan section */
@@ -206,6 +213,8 @@ interface DetailsSidebarProps {
 
 export function DetailsSidebar({
   chatId,
+  projectId,
+  projectPath,
   worktreePath,
   planPath,
   mode,
@@ -545,6 +554,23 @@ export function DetailsSidebar({
                   >
                     <TasksWidget
                       worktreePath={worktreePath}
+                      workspaceId={chatId}
+                    />
+                  </WidgetCard>
+                )
+
+              case "stack":
+                if (!projectId || !projectPath) return null
+                return (
+                  <WidgetCard
+                    key="stack"
+                    widgetId="stack"
+                    title="Stack"
+                    onExpand={() => setExpandedWidget("stack")}
+                  >
+                    <StackWidget
+                      projectId={projectId}
+                      projectPath={projectPath}
                       workspaceId={chatId}
                     />
                   </WidgetCard>

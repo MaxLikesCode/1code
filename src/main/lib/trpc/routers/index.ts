@@ -20,6 +20,7 @@ import { voiceRouter } from "./voice"
 import { pluginsRouter } from "./plugins"
 import { browserRouter } from "./browser"
 import { tasksRouter } from "./tasks"
+import { stackRouter } from "./stack"
 import { createGitRouter } from "../../git"
 import { BrowserWindow } from "electron"
 
@@ -50,6 +51,7 @@ export function createAppRouter(getWindow: () => BrowserWindow | null) {
     plugins: pluginsRouter,
     browser: browserRouter,
     tasks: tasksRouter,
+    stack: stackRouter,
     // Git operations - named "changes" to match Superset API
     changes: createGitRouter(),
   })
