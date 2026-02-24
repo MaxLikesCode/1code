@@ -1903,29 +1903,15 @@ ${prompt}
                       questions: (toolInput as any).questions,
                     } as UIMessageChunk)
 
-                    // Wait for response (60s timeout)
+                    // Wait for user response (no timeout - wait indefinitely)
                     const response = await new Promise<{
                       approved: boolean
                       message?: string
                       updatedInput?: unknown
                     }>((resolve) => {
-                      const timeoutId = setTimeout(() => {
-                        pendingToolApprovals.delete(toolUseID)
-                        // Emit chunk to notify UI that the question has timed out
-                        // This ensures the pending question dialog is cleared
-                        safeEmit({
-                          type: "ask-user-question-timeout",
-                          toolUseId: toolUseID,
-                        } as UIMessageChunk)
-                        resolve({ approved: false, message: "Timed out" })
-                      }, 60000)
-
                       pendingToolApprovals.set(toolUseID, {
                         subChatId: input.subChatId,
-                        resolve: (d) => {
-                          clearTimeout(timeoutId)
-                          resolve(d)
-                        },
+                        resolve,
                       })
                     })
 
