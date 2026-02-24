@@ -1,14 +1,9 @@
 "use client"
 
-import { memo, useCallback, useEffect, useRef, useState } from "react"
-import {
-	Play,
-	Square,
-	Loader2,
-	CheckCircle2,
-	XCircle,
-	ChevronDown,
-} from "lucide-react"
+import { memo, useCallback, useMemo, useState, useEffect } from "react"
+import { Play, Square, ChevronDown } from "lucide-react"
+import { useTheme } from "next-themes"
+import { useAtomValue } from "jotai"
 import { Button } from "@/components/ui/button"
 import {
 	Tooltip,
@@ -17,44 +12,16 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { trpc } from "@/lib/trpc"
+import { Terminal } from "@/features/terminal/terminal"
+import { getDefaultTerminalBg } from "@/features/terminal/helpers"
+import { fullThemeDataAtom } from "@/lib/atoms"
+import { motion } from "motion/react"
 
-// Strip ANSI escape codes for clean display
-function stripAnsi(str: string): string {
-	return str.replace(
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
-		/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-		"",
-	)
-}
-
-interface RunningTaskState {
-	taskId: string
+interface TaskTerminal {
+	/** Script name this terminal is running */
 	scriptName: string
-	status: "running" | "success" | "error" | "stopped"
-	logs: string[]
-	exitCode?: number | null
-}
-
-// Invisible component that subscribes to a task's output stream
-function TaskOutputStream({
-	taskId,
-	onData,
-	onExit,
-}: {
-	taskId: string
-	onData: (taskId: string, data: string) => void
-	onExit: (taskId: string, exitCode: number | null) => void
-}) {
-	trpc.tasks.stream.useSubscription(taskId, {
-		onData: (event) => {
-			if (event.type === "stdout" || event.type === "stderr") {
-				if (event.data) onData(taskId, event.data)
-			} else if (event.type === "exit") {
-				onExit(taskId, event.exitCode ?? null)
-			}
-		},
-	})
-	return null
+	/** Unique paneId for the terminal session */
+	paneId: string
 }
 
 interface TasksWidgetProps {
@@ -71,123 +38,99 @@ export const TasksWidget = memo(function TasksWidget({
 		{ staleTime: 30_000 },
 	)
 
-	const [runningTasks, setRunningTasks] = useState<
-		Map<string, RunningTaskState>
-	>(new Map())
-	const [expandedScript, setExpandedScript] = useState<string | null>(null)
-
-	const logEndRef = useRef<HTMLDivElement>(null)
-
-	const runMutation = trpc.tasks.run.useMutation()
-	const stopMutation = trpc.tasks.stop.useMutation()
-
-	// Reconnect to tasks that are already running (e.g. after re-mount)
-	const { data: alreadyRunning } = trpc.tasks.listRunning.useQuery(
-		{ workspaceId },
-		{ staleTime: 5_000 },
+	// Track active task terminals: scriptName -> paneId
+	const [taskTerminals, setTaskTerminals] = useState<Map<string, TaskTerminal>>(
+		new Map(),
 	)
+	// Which task's terminal is currently shown
+	const [activeTask, setActiveTask] = useState<string | null>(null)
 
-	useEffect(() => {
-		if (!alreadyRunning || alreadyRunning.length === 0) return
-		setRunningTasks((prev) => {
-			const next = new Map(prev)
-			for (const t of alreadyRunning) {
-				if (!next.has(t.scriptName)) {
-					next.set(t.scriptName, {
-						taskId: t.taskId,
-						scriptName: t.scriptName,
-						status: "running",
-						logs: t.logBuffer ?? [],
-					})
-				}
-			}
-			return next
-		})
-	}, [alreadyRunning])
+	const createOrAttachMutation = trpc.terminal.createOrAttach.useMutation()
+	const killMutation = trpc.terminal.kill.useMutation()
+	const signalMutation = trpc.terminal.signal.useMutation()
+
+	// Theme for terminal background
+	const { resolvedTheme } = useTheme()
+	const isDark = resolvedTheme === "dark"
+	const fullThemeData = useAtomValue(fullThemeDataAtom)
+
+	const terminalBg = useMemo(() => {
+		if (fullThemeData?.colors?.["terminal.background"]) {
+			return fullThemeData.colors["terminal.background"]
+		}
+		if (fullThemeData?.colors?.["editor.background"]) {
+			return fullThemeData.colors["editor.background"]
+		}
+		return getDefaultTerminalBg(isDark)
+	}, [isDark, fullThemeData])
+
+	const pm = scriptData?.packageManager ?? "npm"
 
 	const handleRun = useCallback(
-		(scriptName: string, command: string) => {
-			runMutation.mutate(
-				{ worktreePath, workspaceId, scriptName, command },
-				{
-					onSuccess: ({ taskId }) => {
-						setRunningTasks((prev) => {
-							const next = new Map(prev)
-							next.set(scriptName, {
-								taskId,
-								scriptName,
-								status: "running",
-								logs: [],
-							})
-							return next
-						})
-						setExpandedScript(scriptName)
-					},
-				},
-			)
+		(scriptName: string) => {
+			const paneId = `${workspaceId}:task:${scriptName}:${Date.now()}`
+
+			// Kill existing terminal for this script if any
+			const existing = taskTerminals.get(scriptName)
+			if (existing) {
+				killMutation.mutate({ paneId: existing.paneId })
+			}
+
+			// Create a terminal session that runs the command
+			createOrAttachMutation.mutate({
+				paneId,
+				workspaceId,
+				cols: 80,
+				rows: 24,
+				cwd: worktreePath,
+				initialCommands: [`${pm} run ${scriptName}`],
+			})
+
+			setTaskTerminals((prev) => {
+				const next = new Map(prev)
+				next.set(scriptName, { scriptName, paneId })
+				return next
+			})
+			setActiveTask(scriptName)
 		},
-		[worktreePath, workspaceId, runMutation],
+		[workspaceId, worktreePath, pm, taskTerminals, createOrAttachMutation, killMutation],
 	)
 
 	const handleStop = useCallback(
 		(scriptName: string) => {
-			const task = runningTasks.get(scriptName)
+			const task = taskTerminals.get(scriptName)
 			if (task) {
-				stopMutation.mutate({ taskId: task.taskId })
-				setRunningTasks((prev) => {
+				// Send Ctrl+C (SIGINT) first
+				signalMutation.mutate({ paneId: task.paneId, signal: "SIGINT" })
+			}
+		},
+		[taskTerminals, signalMutation],
+	)
+
+	const handleClose = useCallback(
+		(scriptName: string) => {
+			const task = taskTerminals.get(scriptName)
+			if (task) {
+				killMutation.mutate({ paneId: task.paneId })
+				setTaskTerminals((prev) => {
 					const next = new Map(prev)
-					const t = next.get(scriptName)
-					if (t) next.set(scriptName, { ...t, status: "stopped" })
+					next.delete(scriptName)
 					return next
 				})
-			}
-		},
-		[runningTasks, stopMutation],
-	)
-
-	const handleStreamData = useCallback((taskId: string, data: string) => {
-		setRunningTasks((prev) => {
-			const next = new Map(prev)
-			for (const [key, task] of next) {
-				if (task.taskId === taskId) {
-					const newLogs = [...task.logs, data]
-					// Cap at 500 entries
-					if (newLogs.length > 500) newLogs.splice(0, newLogs.length - 500)
-					next.set(key, { ...task, logs: newLogs })
-					break
+				if (activeTask === scriptName) {
+					setActiveTask(null)
 				}
 			}
-			return next
-		})
-	}, [])
-
-	const handleStreamExit = useCallback(
-		(taskId: string, exitCode: number | null) => {
-			setRunningTasks((prev) => {
-				const next = new Map(prev)
-				for (const [key, task] of next) {
-					if (task.taskId === taskId) {
-						next.set(key, {
-							...task,
-							status: exitCode === 0 ? "success" : "error",
-							exitCode,
-						})
-						break
-					}
-				}
-				return next
-			})
 		},
-		[],
+		[taskTerminals, activeTask, killMutation],
 	)
 
-	// Auto-scroll log area when expanded script gets new data
+	// Clean up all task terminals on unmount
 	useEffect(() => {
-		logEndRef.current?.scrollIntoView({ behavior: "smooth" })
-	}, [
-		expandedScript,
-		runningTasks.get(expandedScript ?? "")?.logs.length,
-	])
+		return () => {
+			// We don't kill here — terminals survive for reattach
+		}
+	}, [])
 
 	const scripts = scriptData?.scripts ?? []
 
@@ -201,56 +144,71 @@ export const TasksWidget = memo(function TasksWidget({
 		)
 	}
 
-	// Render invisible subscription components for all running tasks
-	const activeSubscriptions = Array.from(runningTasks.values()).filter(
-		(t) => t.status === "running",
-	)
+	const activeTerminal = activeTask ? taskTerminals.get(activeTask) : null
 
 	return (
-		<div className="px-2 py-1.5 flex flex-col gap-0.5">
-			{/* Invisible subscription components */}
-			{activeSubscriptions.map((task) => (
-				<TaskOutputStream
-					key={task.taskId}
-					taskId={task.taskId}
-					onData={handleStreamData}
-					onExit={handleStreamExit}
-				/>
-			))}
+		<div className="flex flex-col">
+			{/* Script list */}
+			<div className="px-2 py-1.5 flex flex-col gap-0.5">
+				{scripts.map(({ name, command }) => {
+					const task = taskTerminals.get(name)
+					const isActive = activeTask === name
 
-			{scripts.map(({ name, command }) => {
-				const task = runningTasks.get(name)
-				const isRunning = task?.status === "running"
-				const isExpanded = expandedScript === name && !!task
-
-				return (
-					<div key={name}>
-						{/* Script row */}
-						<div className="flex items-center gap-1.5 min-h-[28px] rounded px-1.5 py-0.5 -ml-0.5 hover:bg-accent group">
-							<TaskStatusIcon status={task?.status} />
-
+					return (
+						<div
+							key={name}
+							className={cn(
+								"flex items-center gap-1.5 min-h-[28px] rounded px-1.5 py-0.5 -ml-0.5 group transition-colors",
+								isActive ? "bg-accent" : "hover:bg-accent",
+							)}
+						>
+							{/* Script name — click to show/hide terminal */}
 							<button
 								type="button"
 								className="text-xs text-foreground truncate flex-1 text-left"
-								onClick={() =>
-									setExpandedScript(expandedScript === name ? null : name)
-								}
+								onClick={() => {
+									if (task) {
+										setActiveTask(isActive ? null : name)
+									}
+								}}
 								title={command}
 							>
 								{name}
 							</button>
 
-							{/* Show chevron if task has logs */}
+							{/* Show chevron if task has a terminal */}
 							{task && (
 								<ChevronDown
 									className={cn(
 										"h-3 w-3 text-muted-foreground/50 shrink-0 transition-transform duration-150",
-										!isExpanded && "-rotate-90",
+										!isActive && "-rotate-90",
 									)}
 								/>
 							)}
 
-							{/* Run / Stop button */}
+							{/* Stop button (visible when task has a terminal) */}
+							{task && (
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button
+											variant="ghost"
+											size="icon"
+											className="h-5 w-5 p-0 hover:bg-foreground/10 text-muted-foreground hover:text-foreground rounded-md opacity-0 group-hover:opacity-100 transition-[background-color,opacity] duration-150 ease-out flex-shrink-0"
+											onClick={(e) => {
+												e.stopPropagation()
+												handleStop(name)
+											}}
+										>
+											<Square className="h-3 w-3" />
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent side="left">
+										Stop
+									</TooltipContent>
+								</Tooltip>
+							)}
+
+							{/* Run button */}
 							<Tooltip>
 								<TooltipTrigger asChild>
 									<Button
@@ -259,63 +217,43 @@ export const TasksWidget = memo(function TasksWidget({
 										className="h-5 w-5 p-0 hover:bg-foreground/10 text-muted-foreground hover:text-foreground rounded-md opacity-0 group-hover:opacity-100 transition-[background-color,opacity] duration-150 ease-out flex-shrink-0"
 										onClick={(e) => {
 											e.stopPropagation()
-											isRunning
-												? handleStop(name)
-												: handleRun(name, command)
+											handleRun(name)
 										}}
 									>
-										{isRunning ? (
-											<Square className="h-3 w-3" />
-										) : (
-											<Play className="h-3 w-3" />
-										)}
+										<Play className="h-3 w-3" />
 									</Button>
 								</TooltipTrigger>
 								<TooltipContent side="left">
-									{isRunning ? "Stop" : `Run "${name}"`}
+									Run "{name}"
 								</TooltipContent>
 							</Tooltip>
 						</div>
+					)
+				})}
+			</div>
 
-						{/* Inline log preview */}
-						{isExpanded && task && (
-							<div className="ml-[18px] mt-0.5 mb-1 rounded bg-muted/50 border border-border/30 max-h-[150px] overflow-y-auto">
-								<pre className="text-[10px] leading-[1.4] text-muted-foreground font-mono whitespace-pre-wrap p-2">
-									{task.logs.length > 0
-										? stripAnsi(task.logs.slice(-30).join(""))
-										: "Waiting for output..."}
-								</pre>
-								<div ref={logEndRef} />
-							</div>
-						)}
-					</div>
-				)
-			})}
+			{/* Embedded terminal for active task */}
+			{activeTerminal && (
+				<div
+					className="min-h-0 overflow-hidden border-t border-border/30"
+					style={{ backgroundColor: terminalBg, height: "200px" }}
+				>
+					<motion.div
+						key={activeTerminal.paneId}
+						className="h-full"
+						initial={{ opacity: 0 }}
+						animate={{ opacity: 1 }}
+						transition={{ duration: 0 }}
+					>
+						<Terminal
+							paneId={activeTerminal.paneId}
+							cwd={worktreePath}
+							workspaceId={workspaceId}
+							initialCwd={worktreePath}
+						/>
+					</motion.div>
+				</div>
+			)}
 		</div>
 	)
 })
-
-function TaskStatusIcon({ status }: { status?: string }) {
-	switch (status) {
-		case "running":
-			return (
-				<Loader2 className="h-3 w-3 text-blue-500 animate-spin flex-shrink-0" />
-			)
-		case "success":
-			return (
-				<CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
-			)
-		case "error":
-			return <XCircle className="h-3 w-3 text-red-500 flex-shrink-0" />
-		case "stopped":
-			return (
-				<Square className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-			)
-		default:
-			return <div className="w-3 h-3 flex-shrink-0" />
-	}
-}
-
-// Exported for use in expanded sidebar view
-export { stripAnsi }
-export type { RunningTaskState }
