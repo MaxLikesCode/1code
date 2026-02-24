@@ -907,19 +907,3 @@ export const preferredEditorAtom = atomWithStorage<ExternalApp>(
   { getOnInit: true },
 )
 
-// ============================================
-// MCP APPROVAL DIALOG ATOMS
-// ============================================
-
-export type PendingMcpApproval = {
-  pluginSource: string
-  serverName: string
-  identifier: string
-  config: Record<string, unknown>
-}
-
-// Whether the MCP approval dialog is open
-export const mcpApprovalDialogOpenAtom = atom<boolean>(false)
-
-// Pending MCP approvals to show in the dialog
-export const pendingMcpApprovalsAtom = atom<PendingMcpApproval[]>([])

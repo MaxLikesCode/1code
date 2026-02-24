@@ -41,10 +41,9 @@ import {
 } from "../../mcp-auth"
 import { fetchOAuthMetadata, getMcpBaseUrl } from "../../oauth"
 import { discoverInstalledPlugins, discoverPluginMcpServers, getPluginComponentPaths } from "../../plugins"
-import { publicProcedure, router } from "../index"
+import { router, publicProcedure } from "../index"
 import { buildAgentsOption } from "./agent-utils"
 import {
-  getApprovedPluginMcpServers,
   getEnabledPlugins,
 } from "./claude-settings"
 import { scanCommandsDirectory, type FileCommand } from "./commands"
@@ -755,17 +754,14 @@ export async function getAllMcpConfigHandler() {
     )
 
     // Plugin MCPs (from installed plugins)
-    const [enabledPluginSources, pluginMcpConfigs, approvedServers] =
+    const [enabledPluginSources, pluginMcpConfigs] =
       await Promise.all([
         getEnabledPlugins(),
         discoverPluginMcpServers(),
-        getApprovedPluginMcpServers(),
       ])
-
     for (const pluginConfig of pluginMcpConfigs) {
       // Only show MCP servers from enabled plugins
       if (!enabledPluginSources.includes(pluginConfig.pluginSource)) continue
-
       const globalServerNames = Object.keys(mergedGlobalServers)
       if (Object.keys(pluginConfig.mcpServers).length > 0) {
         const pluginMcpServers = (
@@ -776,21 +772,8 @@ export async function getAllMcpConfigHandler() {
                 if (globalServerNames.includes(name)) return null
 
                 const configObj = serverConfig as Record<string, unknown>
-                const identifier = `${pluginConfig.pluginSource}:${name}`
-                const isApproved = approvedServers.includes(identifier)
 
-                if (!isApproved) {
-                  return {
-                    name,
-                    status: "pending-approval",
-                    tools: [] as McpToolInfo[],
-                    needsAuth: false,
-                    config: configObj,
-                    isApproved,
-                  }
-                }
-
-                // Try to get status and tools for approved servers
+                // Get status and tools for this server
                 let status = getServerStatusFromConfig(serverConfig)
                 const headers = serverConfig.headers as
                   | Record<string, string>
@@ -840,7 +823,6 @@ export async function getAllMcpConfigHandler() {
                   tools,
                   needsAuth,
                   config: configObj,
-                  isApproved,
                 }
               },
             ),
@@ -1321,15 +1303,13 @@ export const claudeRouter = router({
                 // Per-project config servers override .mcp.json
                 const projectServers = { ...projectMcpJsonServers, ...projectConfigServers }
 
-                // Load plugin MCP servers (filtered by enabled plugins and approval)
+                // Load plugin MCP servers (from enabled plugins)
                 const [
                   enabledPluginSources,
                   pluginMcpConfigs,
-                  approvedServers,
                 ] = await Promise.all([
                   getEnabledPlugins(),
                   discoverPluginMcpServers(),
-                  getApprovedPluginMcpServers(),
                 ])
 
                 const pluginServers: Record<string, McpServerConfig> = {}
@@ -1339,10 +1319,7 @@ export const claudeRouter = router({
                       pConfig.mcpServers,
                     )) {
                       if (!globalServers[name] && !projectServers[name]) {
-                        const identifier = `${pConfig.pluginSource}:${name}`
-                        if (approvedServers.includes(identifier)) {
                           pluginServers[name] = serverConfig
-                        }
                       }
                     }
                   }
@@ -2775,12 +2752,11 @@ ${prompt}
           ...projectConfigServers,
         }
 
-        // Add plugin MCP servers (enabled + approved only)
-        const [enabledPluginSources, pluginMcpConfigs, approvedServers] =
+        // Add plugin MCP servers (from enabled plugins)
+        const [enabledPluginSources, pluginMcpConfigs] =
           await Promise.all([
             getEnabledPlugins(),
             discoverPluginMcpServers(),
-            getApprovedPluginMcpServers(),
           ])
 
         for (const pluginConfig of pluginMcpConfigs) {
@@ -2790,10 +2766,7 @@ ${prompt}
             pluginConfig.mcpServers,
           )) {
             if (!merged[name]) {
-              const identifier = `${pluginConfig.pluginSource}:${name}`
-              if (approvedServers.includes(identifier)) {
-                merged[name] = serverConfig
-              }
+              merged[name] = serverConfig
             }
           }
         }
@@ -3163,56 +3136,4 @@ ${prompt}
       return { success: true }
     }),
 
-  getPendingPluginMcpApprovals: publicProcedure
-    .input(z.object({ projectPath: z.string().optional() }))
-    .query(async ({ input }) => {
-      const [enabledPluginSources, pluginMcpConfigs, approvedServers] =
-        await Promise.all([
-          getEnabledPlugins(),
-          discoverPluginMcpServers(),
-          getApprovedPluginMcpServers(),
-        ])
-
-      // Read global/project servers from all sources for conflict check
-      const config = await readClaudeConfig()
-      const dirConfig = await readClaudeDirConfig()
-      const globalServers = await getMergedGlobalMcpServers(config, dirConfig)
-      let projectServers: Record<string, McpServerConfig> = {}
-      if (input.projectPath) {
-        const projectConfigServers = await getMergedLocalProjectMcpServers(input.projectPath, config, dirConfig)
-        const projectMcpJsonServers = await readProjectMcpJsonCached(input.projectPath)
-        projectServers = { ...projectMcpJsonServers, ...projectConfigServers }
-      }
-
-      const pending: Array<{
-        pluginSource: string
-        serverName: string
-        identifier: string
-        config: Record<string, unknown>
-      }> = []
-
-      for (const pluginConfig of pluginMcpConfigs) {
-        if (!enabledPluginSources.includes(pluginConfig.pluginSource)) continue
-
-        for (const [name, serverConfig] of Object.entries(
-          pluginConfig.mcpServers,
-        )) {
-          const identifier = `${pluginConfig.pluginSource}:${name}`
-          if (
-            !approvedServers.includes(identifier) &&
-            !globalServers[name] &&
-            !projectServers[name]
-          ) {
-            pending.push({
-              pluginSource: pluginConfig.pluginSource,
-              serverName: name,
-              identifier,
-              config: serverConfig as Record<string, unknown>,
-            })
-          }
-        }
-      }
-
-      return { pending }
-    }),
 })

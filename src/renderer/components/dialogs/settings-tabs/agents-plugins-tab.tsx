@@ -613,29 +613,12 @@ export function AgentsPluginsTab() {
     }
   }, [installMutation, refetch, refetchAvailable])
 
-  const approveAllMutation = trpc.claudeSettings.approveAllPluginMcpServers.useMutation()
-  const revokeAllMutation = trpc.claudeSettings.revokeAllPluginMcpServers.useMutation()
-
   const handleToggleEnabled = useCallback(async (plugin: PluginData, enabled: boolean) => {
     try {
       await setPluginEnabledMutation.mutateAsync({
         pluginSource: plugin.source,
         enabled,
       })
-
-      // Auto-approve/revoke MCP servers with the plugin
-      if (plugin.components.mcpServers.length > 0) {
-        if (enabled) {
-          await approveAllMutation.mutateAsync({
-            pluginSource: plugin.source,
-            serverNames: plugin.components.mcpServers,
-          })
-        } else {
-          await revokeAllMutation.mutateAsync({
-            pluginSource: plugin.source,
-          })
-        }
-      }
 
       toast.success(enabled ? "Plugin enabled" : "Plugin disabled", {
         description: formatPluginName(plugin.name),
@@ -645,7 +628,7 @@ export function AgentsPluginsTab() {
       const message = error instanceof Error ? error.message : "Failed to update plugin"
       toast.error(message)
     }
-  }, [setPluginEnabledMutation, approveAllMutation, revokeAllMutation, refetch])
+  }, [setPluginEnabledMutation, refetch])
 
   return (
     <div className="flex h-full overflow-hidden">
